@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "Browser tabs (Chromium)",
+      "match": {"class": "*chrom*"},
+      "thumb_wheel": {"mode": "tabs", "step": 120}
+    },
+    {
+      "name": "Blender view controls",
+      "match": {"class": "*blender*"},
+      "thumb_wheel": {
+        "mode": "custom", "step": 120,
+        "left": {"type": "key", "keys": ["KPMINUS"]},
+        "right": {"type": "key", "keys": ["KPPLUS"]}
+      },
+      "gesture": {
+        "tap": {"type": "key", "keys": ["KP5"]},
+        "left": {"type": "key", "keys": ["KP4"]},
+        "right": {"type": "key", "keys": ["KP6"]},
+        "up": {"type": "key", "keys": ["KP8"]},
+        "down": {"type": "key", "keys": ["KP2"]}
+      }
+    },
+    {
+      "name": "Kdenlive timeline scrub",
+      "match": {"class": "*kdenlive*"},
+      "thumb_wheel": {
+        "mode": "custom", "step": 60,
+        "left": {"type": "key", "keys": ["LEFT"]},
+        "right": {"type": "key", "keys": ["RIGHT"]}
+      }
+    }
+  ]
+}

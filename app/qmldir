@@ -1,0 +1,34 @@
+ActionPicker 1.0 ActionPicker.qml
+ActionSlot 1.0 ActionSlot.qml
+AppState 1.0 AppState.qml
+ApplicationPicker 1.0 ApplicationPicker.qml
+Button 1.0 Button.qml
+Card 1.0 Card.qml
+CommandQueue 1.0 CommandQueue.qml
+Dropdown 1.0 Dropdown.qml
+GesturePanel 1.0 GesturePanel.qml
+Label 1.0 Label.qml
+MouseIllustration 1.0 MouseIllustration.qml
+PointScroll 1.0 PointScroll.qml
+SettingsWindow 1.0 SettingsWindow.qml
+ShortcutRecorder 1.0 ShortcutRecorder.qml
+SmartActions 1.0 SmartActions.qml
+singleton Style 1.0 Style.qml
+TextField 1.0 TextField.qml
+singleton Theme 1.0 Theme.qml
+Icon 1.0 Icon.qml
+Brand 1.0 Brand.qml
+Welcome 1.0 Welcome.qml
+DeviceImage 1.0 DeviceImage.qml
+Slider 1.0 Slider.qml
+IconButton 1.0 IconButton.qml
+FocusRing 1.0 FocusRing.qml
+AppGlyph 1.0 AppGlyph.qml
+StatusPill 1.0 StatusPill.qml
+SectionLabel 1.0 SectionLabel.qml
+ModalSheet 1.0 ModalSheet.qml
+HomePanel 1.0 HomePanel.qml
+BackupPanel 1.0 BackupPanel.qml
+HelpPanel 1.0 HelpPanel.qml
+ProfileManager 1.0 ProfileManager.qml
+LinkButton 1.0 LinkButton.qml

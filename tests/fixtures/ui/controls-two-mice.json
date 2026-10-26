@@ -1,0 +1,129 @@
+{
+  "daemon": true,
+  "devices": [
+    {
+      "device": 0,
+      "model": "MX Master 2S",
+      "writable": true,
+      "battery": {
+        "percent": 82,
+        "charging": false,
+        "status": "discharging"
+      },
+      "buttons": [
+        {
+          "name": "gesture",
+          "label": "Gesture button",
+          "available": true
+        },
+        {
+          "name": "back",
+          "label": "Back",
+          "available": true
+        },
+        {
+          "name": "forward",
+          "label": "Forward",
+          "available": true
+        },
+        {
+          "name": "middle",
+          "label": "Middle click",
+          "available": true
+        },
+        {
+          "name": "mode_shift",
+          "label": "Wheel mode",
+          "available": true
+        }
+      ],
+      "gesture": true,
+      "thumb_wheel": {
+        "available": true
+      },
+      "dpi": {
+        "current": 1000,
+        "choices": [
+          400,
+          600,
+          800,
+          1000,
+          1200,
+          1600,
+          2000,
+          2400,
+          3200,
+          4000
+        ]
+      },
+      "smartshift": {
+        "mode": "ratchet",
+        "threshold": 16
+      },
+      "scroll": {
+        "inverted": false
+      },
+      "connection": "unifying",
+      "identity": {
+        "name": "MX Master 2S",
+        "index": 1
+      }
+    },
+    {
+      "device": 1,
+      "model": "MX Anywhere 3 (fixture)",
+      "writable": true,
+      "battery": {
+        "percent": 65,
+        "status": "discharging"
+      },
+      "buttons": [
+        {
+          "name": "back",
+          "label": "Back",
+          "available": true
+        },
+        {
+          "name": "forward",
+          "label": "Forward",
+          "available": true
+        },
+        {
+          "name": "middle",
+          "label": "Middle click",
+          "available": true
+        }
+      ],
+      "gesture": false,
+      "thumb_wheel": {
+        "available": false,
+        "reason": "This mouse does not expose a divertible thumb wheel."
+      },
+      "dpi": {
+        "current": 1000,
+        "choices": [
+          400,
+          800,
+          1000,
+          1600,
+          2000,
+          2400,
+          3200
+        ]
+      },
+      "smartshift": {
+        "mode": "ratchet",
+        "threshold": 16
+      },
+      "scroll": {
+        "inverted": false
+      },
+      "connection": "bluetooth",
+      "fixture_only": true,
+      "identity": {
+        "name": "MX Master 3S",
+        "index": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Isolated UI fixture CLI. Never invokes the real Maestro engine or mouse.
+set -euo pipefail
+fixtures=$(cd -- "$(dirname -- "$0")" && pwd)
+source "$fixtures/isolation.sh"
+state=${MAESTRO_UI_STATE:-}
+if [[ -n "$state" ]] && ! maestro_ui_private_path "$state"; then
+  echo '{"ok":false,"errors":[{"path":"fixture","message":"Fixture state must be in /tmp/maestro-ui-*"}]}'
+  exit 1
+fi
+if [[ ${MAESTRO_FIXTURE_FAILURE:-} == "${1:-}" ]]; then
+  cat "$fixtures/command-error.json"
+  exit 1
+fi
+if [[ ${MAESTRO_FIXTURE_MALFORMED:-} == "${1:-}" ]]; then printf '%s\n' 'not-json'; exit 0; fi
+if [[ ${MAESTRO_FIXTURE_DELAY:-} == "${1:-}" ]]; then exec sleep 40; fi
+case "${1:-} ${2:-}" in
+  'controls --json')
+    python3 - "$fixtures" "$state" "${MAESTRO_CONTROLS_FIXTURE:-controls}" "${MAESTRO_CONFIG_FIXTURE:-config}" <<'PYCONTROLS'
+import json
+import sys
+from pathlib import Path
+
+fixtures, state, controls_name, config_name = sys.argv[1:]
+sys.path.insert(0, str(Path(fixtures).parents[2]))
+from maestro.daemon.profiles import resolve
+
+controls = json.loads((Path(fixtures) / f"{controls_name}.json").read_text())
+config_path = Path(state) if state and Path(state).is_file() else Path(fixtures) / f"{config_name}.json"
+config = json.loads(config_path.read_text())
+for device in controls["devices"]:
+    identity = device.setdefault("identity", {"name": device["model"], "index": device["device"] + 1})
+    options = resolve(config, identity)
+    device["options"] = options
+    settings = options["settings"]
+    if "dpi" in settings and device.get("dpi") and "error" not in device["dpi"]:
+        device["dpi"]["current"] = settings["dpi"]
+    if "smartshift" in settings and device.get("smartshift"):
+        device["smartshift"].update(settings["smartshift"])
+    if "invert" in settings:
+        device["scroll"]["inverted"] = settings["invert"]
+print(json.dumps(controls))
+PYCONTROLS
+    ;;
+  'catalog --json') cat "$fixtures/catalog.json" ;;
+  'config get')
+    if [[ -n "$state" && -f "$state" ]]; then cat "$state"; else cat "$fixtures/${MAESTRO_CONFIG_FIXTURE:-config}.json"; fi ;;
+  'config backups') cat "$fixtures/backups.json" ;;
+  'config apply')
+    input=$(cat)
+    if ! jq -e 'type == "object" and .version == 1' >/dev/null 2>&1 <<< "$input"; then
+      echo '{"ok":false,"errors":[{"path":"config","message":"Expected version 1 config JSON on stdin"}]}'
+      exit 1
+    fi
+    if jq -e '.. | strings | select(. == "INVALID")' >/dev/null <<< "$input"; then
+      cat "$fixtures/apply-error.json"; exit 1
+    fi
+    if ! validation=$(printf '%s\n' "$input" | python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from maestro.daemon.config import validate
+from maestro.__main__ import _json_error
+try:
+    validate(json.load(sys.stdin))
+except ValueError as error:
+    sys.exit(_json_error(error))
+' "$fixtures/../../.."); then printf '%s\n' "$validation"; exit 1; fi
+    if [[ -n "$state" ]]; then
+      if [[ -f "$state" ]]; then cp "$state" "$state.undo"; else cp "$fixtures/config.json" "$state.undo"; fi
+      printf '%s\n' "$input" > "$state"
+    fi
+    cat "$fixtures/${MAESTRO_APPLY_FIXTURE:-apply-ok}.json" ;;
+  'config undo')
+    if [[ -z "$state" || ! -f "$state.undo" ]]; then cat "$fixtures/command-error.json"; exit 1; fi
+    mv "$state.undo" "$state"
+    cat "$fixtures/${MAESTRO_APPLY_FIXTURE:-apply-ok}.json" ;;
+  'config restore')
+    if [[ -n "$state" ]]; then
+      if [[ -f "$state" ]]; then cp "$state" "$state.undo"; else cp "$fixtures/config.json" "$state.undo"; fi
+      cp "$fixtures/config.json" "$state"
+    fi
+    cat "$fixtures/${MAESTRO_APPLY_FIXTURE:-apply-ok}.json" ;;
+  'test-action --stdin')
+    if jq -e '(.type | type == "string") or . == null' >/dev/null; then cat "$fixtures/test-ok.json"; else cat "$fixtures/command-error.json"; exit 1; fi ;;
+  *) cat "$fixtures/command-error.json"; exit 1 ;;
+esac

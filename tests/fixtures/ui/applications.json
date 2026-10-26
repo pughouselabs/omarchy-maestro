@@ -1,0 +1,7 @@
+[
+  {"name":"Firefox","startupClass":"firefox","id":"firefox.desktop","icon":"fixture-firefox","open":true},
+  {"name":"Terminal","startupClass":"terminal","id":"terminal.desktop","icon":"fixture-terminal","open":true},
+  {"name":"Files","startupClass":"files","id":"files.desktop","icon":"fixture-files"},
+  {"name":"Code","startupClass":"code","id":"code.desktop","icon":"fixture-code"},
+  {"name":"Spotify","startupClass":"spotify","id":"spotify.desktop","icon":"fixture-spotify"}
+]

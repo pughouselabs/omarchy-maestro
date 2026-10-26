@@ -1,0 +1,8 @@
+top.png is a render of "Logitech MX master 2S (@danish_blends)" by danish_blends,
+https://sketchfab.com/3d-models/logitech-mx-master-2s-danish-blends-e8f3235951934a01aba4e0ee3de72e71
+licensed under CC BY-NC 4.0 (https://creativecommons.org/licenses/by-nc/4.0/).
+Changes: rendered with new lighting and camera; status light hidden. Not affiliated with or endorsed by Logitech.
+This image is NOT covered by Maestro's MIT license and may not be used commercially.
+
+The same license and credit apply to hero.png, hero-rim.png, thumb.png, top-down.png (and their @1x copies) in this
+folder and to ../silhouette.png, all rendered from the same model.

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Maestro
+Comment=Customize your Logitech MX mouse
+Exec=maestro-settings
+Icon=io.github.nodrej.maestro
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupWMClass=org.quickshell
+Keywords=Logitech;MX;mouse;buttons;gestures;

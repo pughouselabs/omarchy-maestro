@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "errors": [
+    {
+      "path": "daemon",
+      "message": "The Maestro daemon is not running. Start it and try again."
+    }
+  ]
+}

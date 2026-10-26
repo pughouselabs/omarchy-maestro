@@ -1,0 +1,17 @@
+[Unit]
+Description=Maestro mouse settings, buttons and gestures
+Documentation=https://github.com/nodrej/omarchy-maestro/blob/main/docs/configuration.md
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/maestrod
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

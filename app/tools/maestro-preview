@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# UI-only fixtures: no engine, mouse, service socket, or personal settings.
+set -euo pipefail
+repo=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+export MAESTRO_CONTROLS_FIXTURE=${MAESTRO_CONTROLS_FIXTURE:-controls-unavailable}
+if [[ ${1:-} == controls ]]; then
+  "$repo/tests/fixtures/ui/maestro-fake" "$@" | jq --arg no_mouse "${MAESTRO_PREVIEW_NO_MOUSE:-0}" --arg two_mice "${MAESTRO_PREVIEW_TWO_MICE:-0}" --arg offline "${MAESTRO_PREVIEW_SERVICE_OFFLINE:-0}" '.daemon = ($offline != "1") | .devices |= (if $no_mouse == "1" then [] else map(select(.fixture_only != true or $two_mice == "1")) end)'
+else
+  exec "$repo/tests/fixtures/ui/maestro-fake" "$@"
+fi

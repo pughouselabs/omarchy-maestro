@@ -1,0 +1,10 @@
+# USB receivers expose the Logitech vendor ID in the USB parent attributes.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", TAG+="uaccess"
+
+# Bluetooth HID++ interfaces have a 0005:046D:* HID parent instead of USB
+# idVendor attributes; match that HID parent so the active seat gets access.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", KERNELS=="0005:046D:*", TAG+="uaccess"
+
+# maestrod uses uinput to expose configured input actions; this permission is
+# required only when running maestrod.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include what you expected and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Maestro version
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps and output
+      description: Remove personal information before posting logs.
+    validations:
+      required: true

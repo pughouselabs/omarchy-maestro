@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "settings": {},
+  "hyprland_dispatch": "auto",
+  "buttons": {},
+  "gesture": {
+    "enabled": true,
+    "button": "gesture",
+    "threshold": 50,
+    "tap": {"type": "desktop", "action": "app_switcher"},
+    "left": {"type": "desktop", "action": "workspace_previous"},
+    "right": {"type": "desktop", "action": "workspace_next"},
+    "up": {"type": "desktop", "action": "fullscreen"},
+    "down": {"type": "desktop", "action": "menu"}
+  },
+  "thumb_wheel": {"mode": "horizontal", "step": 120},
+  "devices": [],
+  "profiles": []
+}

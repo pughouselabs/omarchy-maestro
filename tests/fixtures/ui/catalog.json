@@ -1,0 +1,1094 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "omarchy",
+      "label": "Omarchy",
+      "actions": [
+        {
+          "id": "omarchy.menu",
+          "label": "Omarchy menu",
+          "description": "Open the main menu",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "menu",
+              "toggle",
+              "root"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.apps",
+          "label": "Apps",
+          "description": "Open the app launcher",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "menu",
+              "toggle",
+              "apps"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.terminal",
+          "label": "Terminal",
+          "description": "Open the default terminal",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "launch",
+              "terminal"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.browser",
+          "label": "Browser",
+          "description": "Open the default browser",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "launch",
+              "browser"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.files",
+          "label": "Files",
+          "description": "Open the file manager",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "launch",
+              "nautilus"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.screenshot-region",
+          "label": "Screenshot region",
+          "description": "Copy a selected region",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "capture",
+              "screenshot",
+              "region",
+              "copy"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.screenshot-window",
+          "label": "Screenshot window",
+          "description": "Copy a window image",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "capture",
+              "screenshot",
+              "windows",
+              "copy"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.screenshot-full",
+          "label": "Screenshot screen",
+          "description": "Copy the full screen",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "capture",
+              "screenshot",
+              "fullscreen",
+              "copy"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.screen-record",
+          "label": "Start screen recording",
+          "description": "Record the screen",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "capture",
+              "screenrecording"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.screen-record-stop",
+          "label": "Stop screen recording",
+          "description": "Finish recording",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "capture",
+              "screenrecording",
+              "--stop-recording"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.color-picker",
+          "label": "Color picker",
+          "description": "Pick a screen color",
+          "action": {
+            "type": "command",
+            "argv": [
+              "hyprpicker",
+              "-a"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.lock",
+          "label": "Lock screen",
+          "description": "Lock and turn off the display",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "system",
+              "lock"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.theme",
+          "label": "Choose theme",
+          "description": "Open the theme switcher",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "theme",
+              "switcher"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.background-next",
+          "label": "Next background",
+          "description": "Cycle the current theme background",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "theme",
+              "bg",
+              "next"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.notifications",
+          "label": "Notification history",
+          "description": "Open notification history",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "shell",
+              "notifications",
+              "showHistory"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.emoji",
+          "label": "Emoji picker",
+          "description": "Open the emoji picker",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "menu",
+              "emoji"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.clipboard",
+          "label": "Clipboard",
+          "description": "Open clipboard history",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "menu",
+              "clipboard"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.power",
+          "label": "Power menu",
+          "description": "Open power options",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "menu",
+              "toggle",
+              "system"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.night-light",
+          "label": "Night light",
+          "description": "Toggle night light",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "toggle",
+              "nightlight"
+            ]
+          }
+        },
+        {
+          "id": "omarchy.quiet",
+          "label": "Quiet notifications",
+          "description": "Toggle notification silencing",
+          "action": {
+            "type": "command",
+            "argv": [
+              "omarchy",
+              "toggle",
+              "notification",
+              "silencing"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "windows",
+      "label": "Windows and workspaces",
+      "actions": [
+        {
+          "id": "windows.workspace-next",
+          "label": "Next workspace",
+          "description": "Focus the next workspace",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "workspace",
+            "arg": "e+1"
+          }
+        },
+        {
+          "id": "windows.workspace-previous",
+          "label": "Previous workspace",
+          "description": "Focus the previous workspace",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "workspace",
+            "arg": "e-1"
+          }
+        },
+        {
+          "id": "windows.move-one",
+          "label": "Move to workspace 1",
+          "description": "Move the window to workspace 1",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "movetoworkspace",
+            "arg": "1"
+          }
+        },
+        {
+          "id": "windows.move-two",
+          "label": "Move to workspace 2",
+          "description": "Move the window to workspace 2",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "movetoworkspace",
+            "arg": "2"
+          }
+        },
+        {
+          "id": "windows.focus-left",
+          "label": "Focus left",
+          "description": "Focus the window to the left",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "movefocus",
+            "arg": "l"
+          }
+        },
+        {
+          "id": "windows.focus-right",
+          "label": "Focus right",
+          "description": "Focus the window to the right",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "movefocus",
+            "arg": "r"
+          }
+        },
+        {
+          "id": "windows.focus-up",
+          "label": "Focus up",
+          "description": "Focus the window above",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "movefocus",
+            "arg": "u"
+          }
+        },
+        {
+          "id": "windows.focus-down",
+          "label": "Focus down",
+          "description": "Focus the window below",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "movefocus",
+            "arg": "d"
+          }
+        },
+        {
+          "id": "windows.focus-firefox",
+          "label": "Focus Firefox",
+          "description": "Focus a Firefox window",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "focuswindow",
+            "arg": "class:firefox"
+          }
+        },
+        {
+          "id": "windows.fullscreen",
+          "label": "Fullscreen",
+          "description": "Toggle fullscreen",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "fullscreen"
+          }
+        },
+        {
+          "id": "windows.floating",
+          "label": "Floating window",
+          "description": "Toggle floating for the window",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "togglefloating"
+          }
+        },
+        {
+          "id": "windows.close",
+          "label": "Close window",
+          "description": "Close the focused window",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "killactive"
+          }
+        },
+        {
+          "id": "windows.next-window",
+          "label": "Next window",
+          "description": "Cycle to the next window",
+          "action": {
+            "type": "hyprland",
+            "dispatcher": "cyclenext"
+          }
+        }
+      ]
+    },
+    {
+      "id": "media",
+      "label": "Media",
+      "actions": [
+        {
+          "id": "media.play-pause",
+          "label": "Play or pause",
+          "description": "Toggle media playback",
+          "action": {
+            "type": "key",
+            "keys": [
+              "PLAYPAUSE"
+            ]
+          }
+        },
+        {
+          "id": "media.next",
+          "label": "Next track",
+          "description": "Skip to the next track",
+          "action": {
+            "type": "key",
+            "keys": [
+              "NEXTSONG"
+            ]
+          }
+        },
+        {
+          "id": "media.previous",
+          "label": "Previous track",
+          "description": "Return to the previous track",
+          "action": {
+            "type": "key",
+            "keys": [
+              "PREVIOUSSONG"
+            ]
+          }
+        },
+        {
+          "id": "media.volume-up",
+          "label": "Volume up",
+          "description": "Raise system volume",
+          "action": {
+            "type": "key",
+            "keys": [
+              "VOLUMEUP"
+            ]
+          }
+        },
+        {
+          "id": "media.volume-down",
+          "label": "Volume down",
+          "description": "Lower system volume",
+          "action": {
+            "type": "key",
+            "keys": [
+              "VOLUMEDOWN"
+            ]
+          }
+        },
+        {
+          "id": "media.mute",
+          "label": "Mute sound",
+          "description": "Toggle output mute",
+          "action": {
+            "type": "key",
+            "keys": [
+              "MUTE"
+            ]
+          }
+        },
+        {
+          "id": "media.mic-mute",
+          "label": "Mute microphone",
+          "description": "Toggle microphone mute",
+          "action": {
+            "type": "key",
+            "keys": [
+              "MICMUTE"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "browser",
+      "label": "Browser",
+      "actions": [
+        {
+          "id": "browser.back",
+          "label": "Back",
+          "description": "Go to the previous page",
+          "action": {
+            "type": "key",
+            "keys": [
+              "ALT",
+              "LEFT"
+            ]
+          }
+        },
+        {
+          "id": "browser.forward",
+          "label": "Forward",
+          "description": "Go to the next page",
+          "action": {
+            "type": "key",
+            "keys": [
+              "ALT",
+              "RIGHT"
+            ]
+          }
+        },
+        {
+          "id": "browser.new-tab",
+          "label": "New tab",
+          "description": "Open a new tab",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "T"
+            ]
+          }
+        },
+        {
+          "id": "browser.close-tab",
+          "label": "Close tab",
+          "description": "Close the current tab",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "W"
+            ]
+          }
+        },
+        {
+          "id": "browser.reopen-tab",
+          "label": "Reopen tab",
+          "description": "Restore the closed tab",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "SHIFT",
+              "T"
+            ]
+          }
+        },
+        {
+          "id": "browser.next-tab",
+          "label": "Next tab",
+          "description": "Switch to the next tab",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "PAGEDOWN"
+            ]
+          }
+        },
+        {
+          "id": "browser.previous-tab",
+          "label": "Previous tab",
+          "description": "Switch to the previous tab",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "PAGEUP"
+            ]
+          }
+        },
+        {
+          "id": "browser.refresh",
+          "label": "Refresh page",
+          "description": "Reload the current page",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "R"
+            ]
+          }
+        },
+        {
+          "id": "browser.address",
+          "label": "Address bar",
+          "description": "Focus the address bar",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "L"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "editing",
+      "label": "Editing",
+      "actions": [
+        {
+          "id": "editing.copy",
+          "label": "Copy",
+          "description": "Copy the selection",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "C"
+            ]
+          }
+        },
+        {
+          "id": "editing.cut",
+          "label": "Cut",
+          "description": "Cut the selection",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "X"
+            ]
+          }
+        },
+        {
+          "id": "editing.paste",
+          "label": "Paste",
+          "description": "Paste clipboard contents",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "V"
+            ]
+          }
+        },
+        {
+          "id": "editing.undo",
+          "label": "Undo",
+          "description": "Undo the last edit",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "Z"
+            ]
+          }
+        },
+        {
+          "id": "editing.redo",
+          "label": "Redo",
+          "description": "Redo the last edit",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "SHIFT",
+              "Z"
+            ]
+          }
+        },
+        {
+          "id": "editing.select-all",
+          "label": "Select all",
+          "description": "Select all content",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "A"
+            ]
+          }
+        },
+        {
+          "id": "editing.save",
+          "label": "Save",
+          "description": "Save the current file",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "S"
+            ]
+          }
+        },
+        {
+          "id": "editing.find",
+          "label": "Find",
+          "description": "Find text",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "F"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "zoom",
+      "label": "Zoom",
+      "actions": [
+        {
+          "id": "zoom.in",
+          "label": "Zoom in",
+          "description": "Increase zoom",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "EQUAL"
+            ]
+          }
+        },
+        {
+          "id": "zoom.out",
+          "label": "Zoom out",
+          "description": "Decrease zoom",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "MINUS"
+            ]
+          }
+        },
+        {
+          "id": "zoom.reset",
+          "label": "Reset zoom",
+          "description": "Return to default zoom",
+          "action": {
+            "type": "key",
+            "keys": [
+              "CTRL",
+              "0"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "mouse",
+      "label": "Mouse",
+      "actions": [
+        {
+          "id": "mouse.left",
+          "label": "Left click",
+          "description": "Send a left click",
+          "action": {
+            "type": "mouse",
+            "button": "left"
+          }
+        },
+        {
+          "id": "mouse.middle",
+          "label": "Middle click",
+          "description": "Send a middle click",
+          "action": {
+            "type": "mouse",
+            "button": "middle"
+          }
+        },
+        {
+          "id": "mouse.right",
+          "label": "Right click",
+          "description": "Send a right click",
+          "action": {
+            "type": "mouse",
+            "button": "right"
+          }
+        },
+        {
+          "id": "mouse.back",
+          "label": "Back click",
+          "description": "Send a back click",
+          "action": {
+            "type": "mouse",
+            "button": "back"
+          }
+        },
+        {
+          "id": "mouse.forward",
+          "label": "Forward click",
+          "description": "Send a forward click",
+          "action": {
+            "type": "mouse",
+            "button": "forward"
+          }
+        },
+        {
+          "id": "mouse.double",
+          "label": "Double click",
+          "description": "Send two left clicks",
+          "action": {
+            "type": "sequence",
+            "steps": [
+              {
+                "type": "mouse",
+                "button": "left"
+              },
+              {
+                "type": "delay",
+                "ms": 80
+              },
+              {
+                "type": "mouse",
+                "button": "left"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "gesture_presets": [
+    {
+      "id": "windows",
+      "label": "Window navigation",
+      "gesture": {
+        "tap": {
+          "type": "desktop",
+          "action": "app_switcher"
+        },
+        "up": {
+          "type": "desktop",
+          "action": "fullscreen"
+        },
+        "down": {
+          "type": "desktop",
+          "action": "menu"
+        },
+        "left": {
+          "type": "desktop",
+          "action": "workspace_previous"
+        },
+        "right": {
+          "type": "desktop",
+          "action": "workspace_next"
+        }
+      }
+    },
+    {
+      "id": "workspaces",
+      "label": "Workspaces",
+      "gesture": {
+        "tap": {
+          "type": "hyprland",
+          "dispatcher": "cyclenext"
+        },
+        "up": {
+          "type": "hyprland",
+          "dispatcher": "workspace",
+          "arg": "e-1"
+        },
+        "down": {
+          "type": "hyprland",
+          "dispatcher": "workspace",
+          "arg": "e+1"
+        },
+        "left": {
+          "type": "hyprland",
+          "dispatcher": "workspace",
+          "arg": "e-1"
+        },
+        "right": {
+          "type": "hyprland",
+          "dispatcher": "workspace",
+          "arg": "e+1"
+        }
+      }
+    },
+    {
+      "id": "media",
+      "label": "Media",
+      "gesture": {
+        "tap": {
+          "type": "key",
+          "keys": [
+            "PLAYPAUSE"
+          ]
+        },
+        "up": {
+          "type": "key",
+          "keys": [
+            "VOLUMEUP"
+          ]
+        },
+        "down": {
+          "type": "key",
+          "keys": [
+            "VOLUMEDOWN"
+          ]
+        },
+        "left": {
+          "type": "key",
+          "keys": [
+            "PREVIOUSSONG"
+          ]
+        },
+        "right": {
+          "type": "key",
+          "keys": [
+            "NEXTSONG"
+          ]
+        }
+      }
+    },
+    {
+      "id": "zoom",
+      "label": "Zoom",
+      "gesture": {
+        "tap": {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "0"
+          ]
+        },
+        "up": {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "EQUAL"
+          ]
+        },
+        "down": {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "MINUS"
+          ]
+        },
+        "left": {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "MINUS"
+          ]
+        },
+        "right": {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "EQUAL"
+          ]
+        }
+      }
+    }
+  ],
+  "smart_action_templates": [
+    {
+      "id": "paste-send",
+      "name": "Paste and send",
+      "description": "Paste the clipboard, then submit",
+      "steps": [
+        {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "V"
+          ]
+        },
+        {
+          "type": "delay",
+          "ms": 150
+        },
+        {
+          "type": "key",
+          "keys": [
+            "ENTER"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "screenshot-region",
+      "name": "Screenshot region",
+      "description": "Select and copy a screen region",
+      "steps": [
+        {
+          "type": "command",
+          "argv": [
+            "omarchy",
+            "capture",
+            "screenshot",
+            "region",
+            "copy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "morning-apps",
+      "name": "Morning apps",
+      "description": "Open the browser and terminal",
+      "steps": [
+        {
+          "type": "command",
+          "argv": [
+            "omarchy",
+            "launch",
+            "browser"
+          ]
+        },
+        {
+          "type": "command",
+          "argv": [
+            "omarchy",
+            "launch",
+            "terminal"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mute-and-lock",
+      "name": "Mute and lock",
+      "description": "Mute the output and lock the desktop",
+      "steps": [
+        {
+          "type": "command",
+          "argv": [
+            "wpctl",
+            "set-mute",
+            "@DEFAULT_AUDIO_SINK@",
+            "1"
+          ]
+        },
+        {
+          "type": "command",
+          "argv": [
+            "omarchy",
+            "system",
+            "lock"
+          ]
+        }
+      ]
+    }
+  ],
+  "defaults": {
+    "version": 1,
+    "settings": {},
+    "buttons": {},
+    "gesture": {
+      "enabled": true,
+      "button": "gesture",
+      "threshold": 50,
+      "tap": {
+        "type": "desktop",
+        "action": "app_switcher"
+      },
+      "left": {
+        "type": "desktop",
+        "action": "workspace_previous"
+      },
+      "right": {
+        "type": "desktop",
+        "action": "workspace_next"
+      },
+      "up": {
+        "type": "desktop",
+        "action": "fullscreen"
+      },
+      "down": {
+        "type": "desktop",
+        "action": "menu"
+      }
+    },
+    "thumb_wheel": {
+      "mode": "horizontal",
+      "step": 120
+    },
+    "hyprland_dispatch": "auto",
+    "devices": [],
+    "profiles": [],
+    "automations": {}
+  }
+}

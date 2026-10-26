@@ -1,0 +1,213 @@
+#!/usr/bin/python3 -I
+"""Open the Maestro settings window, one instance at a time.
+
+A second launch focuses the running window. The launcher never closes or signals
+a window: if the app code changed since the running window started (its recorded
+fingerprint differs from the current one), it focuses the window and asks you to
+reopen it with a desktop notification, once per update. The lock stays held for
+the whole Quickshell lifetime: it is inherited by qs.
+"""
+
+import fcntl
+import hashlib
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import time
+
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+APP = os.path.join(REPO, "app")
+ATTEMPTS = 100
+POLL = 0.1
+UPDATED = ("Maestro was updated", "Close and reopen it to use the new version.")
+CHUNK = 1 << 20
+
+
+def fingerprint(app):
+    """Hash of every file's path and contents under app/, following symlinks.
+
+    Caches and dotfiles are skipped. A folder reached twice (a symlink loop or a
+    second link to it) is read once, so the walk always ends.
+    """
+    digest = hashlib.sha256()
+    seen = set()
+
+    def walk(folder, prefix):
+        try:
+            info = os.stat(folder)
+            names = sorted(os.listdir(folder))
+        except OSError:
+            return
+        if (info.st_dev, info.st_ino) in seen:
+            return
+        seen.add((info.st_dev, info.st_ino))
+        for name in names:
+            if name.startswith(".") or name == "__pycache__":
+                continue
+            path, relative = os.path.join(folder, name), prefix + name
+            try:
+                entry = os.stat(path)
+            except OSError:
+                digest.update(f"{relative}\0missing\n".encode(errors="surrogateescape"))
+                continue
+            if stat.S_ISDIR(entry.st_mode):
+                digest.update(f"{relative}/\n".encode(errors="surrogateescape"))
+                walk(path, relative + "/")
+            else:
+                line = f"{relative}\0{contents(path)}\n"
+                digest.update(line.encode(errors="surrogateescape"))
+
+    walk(app, "")
+    return digest.hexdigest()
+
+
+def contents(path):
+    """sha256 of a file's bytes, read in chunks so large images stay cheap."""
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            while chunk := handle.read(CHUNK):
+                digest.update(chunk)
+    except OSError:
+        return "unreadable"
+    return digest.hexdigest()
+
+
+def start_ticks(pid):
+    """When a process started, in clock ticks since boot. exec keeps it, so the qs
+    window keeps the launcher's value; a reused PID gets a different one."""
+    try:
+        with open(f"/proc/{pid}/stat") as handle:
+            # The command name is in parentheses and may contain spaces; field 22 is starttime.
+            return int(handle.read().rsplit(")", 1)[1].split()[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def load(path):
+    try:
+        with open(path) as handle:
+            value = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def save(path, value):
+    temporary = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(temporary, "w") as handle:
+            json.dump(value, handle)
+        os.replace(temporary, path)
+    except OSError:
+        pass
+
+
+def owns(stamp):
+    """True when the stamp was written for the window that is running now."""
+    return (
+        isinstance(stamp.get("pid"), int)
+        and stamp.get("start") is not None
+        and start_ticks(stamp["pid"]) == stamp["start"]
+    )
+
+
+def check_for_update(path, app):
+    """Notify once per update of the running window's code; ignore anyone else's stamp.
+
+    A short lock serializes read, notify and record, so simultaneous launches send one notice.
+    """
+    try:
+        guard = open(f"{path}.lock", "a")
+    except OSError:
+        return
+    with guard:
+        fcntl.flock(guard, fcntl.LOCK_EX)
+        stamp = load(path)
+        if not stamp or not owns(stamp):
+            return
+        current = fingerprint(app)
+        if current == stamp.get("fingerprint") or current == stamp.get("notified"):
+            return
+        notify_updated()
+        save(path, {**stamp, "notified": current})
+
+
+def notify_updated():
+    """Best effort: no notify-send, or a failing one, is not an error."""
+    tool = shutil.which("notify-send")
+    if not tool:
+        return
+    try:
+        subprocess.run(
+            [tool, "--app-name=Maestro", *UPDATED], capture_output=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def focus(app):
+    try:
+        result = subprocess.run(
+            ["qs", "-p", app, "ipc", "call", "maestro", "focus"],
+            capture_output=True,
+            timeout=1,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def main():
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime:
+        print("Maestro: XDG_RUNTIME_DIR must be set in the desktop session.", file=sys.stderr)
+        return 1
+    if shutil.which("qs") is None:
+        print("Maestro: Quickshell (qs) was not found on PATH.", file=sys.stderr)
+        return 1
+    os.umask(0o077)
+    # App-owned onboarding state, separate from mouse settings.
+    state = os.environ.get("XDG_STATE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local/state"
+    )
+    try:
+        os.makedirs(os.path.join(state, "maestro"), exist_ok=True)
+    except OSError:
+        pass
+    stamp = os.path.join(runtime, "maestro-settings.fingerprint")
+    try:
+        lock = os.open(os.path.join(runtime, "maestro-settings.lock"), os.O_WRONLY | os.O_CREAT)
+    except OSError as error:
+        print(
+            f"Maestro: cannot use the runtime folder {runtime}: {error.strerror}.", file=sys.stderr
+        )
+        return 1
+    for _ in range(ATTEMPTS):
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except BlockingIOError:
+            locked = False
+        if focus(APP):
+            check_for_update(stamp, APP)
+            return 0
+        if locked:
+            pid = os.getpid()
+            save(stamp, {"pid": pid, "start": start_ticks(pid), "fingerprint": fingerprint(APP)})
+            os.set_inheritable(lock, True)
+            try:
+                os.execvp("qs", ["qs", "--no-duplicate", "-p", APP, *sys.argv[1:]])
+            except OSError as error:
+                print(f"Maestro: could not start Quickshell: {error.strerror}.", file=sys.stderr)
+                return 1
+        time.sleep(POLL)
+    print("Maestro is still starting. Try opening it again shortly.", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

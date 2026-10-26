@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.nodrej.maestro",
+  "name": "Maestro",
+  "version": "0.3.0",
+  "author": "nodrej",
+  "license": "MIT",
+  "description": "Battery, DPI, SmartShift, buttons, gestures and app profiles for Logitech MX mice",
+  "kinds": ["bar-widget"],
+  "entryPoints": {"barWidget": "BarWidget.qml"},
+  "barWidget": {
+    "displayName": "Maestro",
+    "category": "Hardware",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {"dpiPresets": "800, 1000, 1600, 2400", "showPercent": true},
+    "schema": [
+      {"key": "dpiPresets", "type": "string", "label": "DPI presets", "description": "Comma-separated DPI values. Only presets supported by the mouse appear.", "defaultValue": "800, 1000, 1600, 2400"},
+      {"key": "showPercent", "type": "boolean", "label": "Show battery percent", "defaultValue": true}
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+pkgname=maestro-mouse
+pkgver=0.3.0
+pkgrel=1
+pkgdesc='Linux settings and controls for Logitech MX mice'
+arch=('any')
+url='https://github.com/nodrej/omarchy-maestro'
+license=('MIT')
+depends=('python>=3.10')
+makedepends=('python-setuptools' 'python-build' 'python-installer')
+source=("maestro-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/maestro-${pkgver}"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$srcdir/maestro-${pkgver}"
+  python -m unittest discover -s tests
+}
+
+package() {
+  cd "$srcdir/maestro-${pkgver}"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 "$srcdir/maestro-${pkgver}/packaging/udev/70-maestro.rules" \
+    "$pkgdir/usr/lib/udev/rules.d/70-maestro.rules"
+  install -Dm644 "$srcdir/maestro-${pkgver}/packaging/modules-load/maestro-uinput.conf" \
+    "$pkgdir/usr/lib/modules-load.d/maestro-uinput.conf"
+  if [[ -f "$srcdir/maestro-${pkgver}/packaging/systemd/maestrod.service" ]]; then
+    install -dm755 "$pkgdir/usr/lib/systemd/user"
+    sed 's|^ExecStart=.*|ExecStart=/usr/bin/maestrod|' \
+      "$srcdir/maestro-${pkgver}/packaging/systemd/maestrod.service" \
+      > "$pkgdir/usr/lib/systemd/user/maestrod.service"
+    chmod 644 "$pkgdir/usr/lib/systemd/user/maestrod.service"
+  fi
+  install -Dm644 "$srcdir/maestro-${pkgver}/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

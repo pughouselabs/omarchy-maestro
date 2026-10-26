@@ -1,0 +1,73 @@
+{
+  "image": "hero.png",
+  "credit": "MX Master 2S 3D model by danish_blends (sketchfab.com/3d-models/logitech-mx-master-2s-danish-blends-e8f3235951934a01aba4e0ee3de72e71), licensed CC BY-NC 4.0; rendered for Maestro.",
+  "hotspots": [
+    {
+      "name": "middle",
+      "label": "Middle click",
+      "x": 0.301,
+      "y": 0.26,
+      "side": "left"
+    },
+    {
+      "name": "mode_shift",
+      "label": "Wheel mode",
+      "x": 0.481,
+      "y": 0.221,
+      "side": "right"
+    },
+    {
+      "name": "thumb_wheel",
+      "label": "Thumb wheel",
+      "x": 0.613,
+      "y": 0.545,
+      "side": "left"
+    },
+    {
+      "name": "forward",
+      "label": "Forward",
+      "x": 0.67,
+      "y": 0.547,
+      "side": "right"
+    },
+    {
+      "name": "back",
+      "label": "Back",
+      "x": 0.758,
+      "y": 0.541,
+      "side": "right"
+    },
+    {
+      "name": "gesture",
+      "label": "Gesture button",
+      "x": 0.455,
+      "y": 0.635,
+      "side": "left"
+    }
+  ],
+  "image_dark": "hero-rim.png",
+  "inset_image": "thumb.png",
+  "top_down_image": "top-down.png",
+  "inset_hotspots": [
+    {
+      "name": "thumb_wheel",
+      "label": "Thumb wheel",
+      "x": 0.27,
+      "y": 0.494
+    },
+    {
+      "name": "forward",
+      "label": "Forward",
+      "x": 0.514,
+      "y": 0.504
+    },
+    {
+      "name": "back",
+      "label": "Back",
+      "x": 0.732,
+      "y": 0.46
+    }
+  ],
+  "credit_changes": "Rendered with new lighting and camera; status light hidden; contact shadow added.",
+  "inset_note": "thumb.png is a magnified, circularly masked crop of the thumb-side close-up; gesture lives on the main image."
+}

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Real engine, private config and socket. Never starts a daemon or writes hardware.
+set -euo pipefail
+repo=$(cd -- "$(dirname -- "$0")/../../.." && pwd)
+test_root=$(realpath -m -- "${MAESTRO_UI_ENGINE_ROOT:-/invalid}")
+if [[ ${MAESTRO_UI_TEST:-} != 1 || "$test_root" != /tmp/maestro-ui-* || "$test_root" == /tmp ]]; then
+  echo '{"ok":false,"errors":[{"path":"test","message":"Choose an isolated /tmp/maestro-ui-* test directory"}]}'
+  exit 1
+fi
+mkdir -p -m 700 -- "$test_root/config" "$test_root/runtime" "$test_root/xdg" "$test_root/state" "$test_root/data" "$test_root/cache"
+exec env -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY -u DISPLAY MAESTRO_CONFIG_HOME="$test_root/config" XDG_CONFIG_HOME="$test_root/xdg" \
+  XDG_STATE_HOME="$test_root/state" XDG_DATA_HOME="$test_root/data" XDG_CACHE_HOME="$test_root/cache" \
+  XDG_RUNTIME_DIR="$test_root/runtime" "$repo/bin/maestro" "$@"

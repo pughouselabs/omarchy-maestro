@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "settings": {
+    "dpi": 1000,
+    "smartshift": {
+      "mode": "ratchet",
+      "threshold": 16
+    },
+    "invert": false
+  },
+  "buttons": {
+    "gesture": null,
+    "back": null,
+    "forward": null,
+    "middle": null,
+    "mode_shift": null
+  },
+  "gesture": {
+    "enabled": true,
+    "button": "gesture",
+    "threshold": 50,
+    "tap": {
+      "type": "desktop",
+      "action": "app_switcher"
+    },
+    "up": {
+      "type": "desktop",
+      "action": "fullscreen"
+    },
+    "down": {
+      "type": "desktop",
+      "action": "menu"
+    },
+    "left": {
+      "type": "desktop",
+      "action": "workspace_previous"
+    },
+    "right": {
+      "type": "desktop",
+      "action": "workspace_next"
+    }
+  },
+  "thumb_wheel": {
+    "mode": "horizontal",
+    "step": 120
+  },
+  "profiles": [
+    {
+      "name": "Firefox",
+      "match": {
+        "class": "firefox"
+      },
+      "buttons": {
+        "forward": {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "T"
+          ]
+        }
+      }
+    }
+  ],
+  "automations": {
+    "paste-and-send": {
+      "name": "Paste and send",
+      "description": "Paste a message, then send it.",
+      "steps": [
+        {
+          "type": "key",
+          "keys": [
+            "CTRL",
+            "V"
+          ]
+        },
+        {
+          "type": "delay",
+          "ms": 150
+        },
+        {
+          "type": "key",
+          "keys": [
+            "ENTER"
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Hello"
+        }
+      ]
+    }
+  },
+  "devices": [
+    {
+      "match": {
+        "name": "MX Master 2S",
+        "index": 1
+      },
+      "settings": {
+        "dpi": 800
+      }
+    },
+    {
+      "match": {
+        "name": "MX Master 3S",
+        "index": 2
+      },
+      "settings": {
+        "dpi": 2000
+      }
+    },
+    {
+      "match": {
+        "index": 1
+      },
+      "settings": {
+        "dpi": 800
+      }
+    }
+  ]
+}

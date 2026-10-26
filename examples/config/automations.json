@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "automations": {
+    "paste-and-send": {
+      "name": "Paste and send",
+      "description": "Paste the clipboard and press Enter",
+      "steps": [
+        {"type": "key", "keys": ["CTRL", "V"]},
+        {"type": "delay", "ms": 150},
+        {"type": "key", "keys": ["ENTER"]}
+      ]
+    }
+  },
+  "buttons": {"back": {"type": "automation", "id": "paste-and-send"}}
+}

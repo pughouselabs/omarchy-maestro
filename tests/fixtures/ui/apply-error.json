@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "errors": [
+    {
+      "path": "buttons.back.keys",
+      "message": "Unknown Linux key name: INVALID"
+    }
+  ]
+}

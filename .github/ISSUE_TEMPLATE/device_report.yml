@@ -1,0 +1,30 @@
+name: New device report
+description: Report observations from an additional Logitech MX mouse
+title: "[Device]: "
+labels: [device report]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Exact mouse model
+    validations:
+      required: true
+  - type: input
+    id: transport
+    attributes:
+      label: Connection
+      placeholder: Unifying, Bolt, or Bluetooth
+    validations:
+      required: true
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: maestro diagnose output
+      description: Run `maestro diagnose` and review the redacted output before posting.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional observations
