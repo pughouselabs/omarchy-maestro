@@ -392,9 +392,19 @@ lighting and camera, printed logo and status light removed, contact shadow
 added. See
 [app/assets/devices/mx-vertical/LICENSE.txt](app/assets/devices/mx-vertical/LICENSE.txt).
 
-Pictures for the MX Master 3, MX Master 3S, MX Master 4 and other models are
-not yet included. Those models show the neutral silhouette. A picture
-added later comes with its own credits and license in its folder.
+The MX Master 3, MX Master 3S and MX Master 4 image is edited from photos by
+**Hayden Schiff** on Wikimedia Commons
+([Logitech MX Master 3S HS10](https://commons.wikimedia.org/wiki/File:Logitech_MX_Master_3S_HS10.jpg),
+[HS17](https://commons.wikimedia.org/wiki/File:Logitech_MX_Master_3S_HS17.jpg) and
+[HS03](https://commons.wikimedia.org/wiki/File:Logitech_MX_Master_3S_HS03.jpg)),
+licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Changes: background and printed logo removed, cropped, contact shadow and rim
+light added. See
+[app/assets/devices/mx-master-3s/LICENSE.txt](app/assets/devices/mx-master-3s/LICENSE.txt).
+
+Pictures for the MX Anywhere and MX Ergo models are not yet included. Those
+models show the neutral silhouette. Own one of them? A clear photo on a plain
+background, shared under a free license, is a welcome contribution.
 
 The Maestro mark and interface icons are original project assets.
 
@@ -409,5 +419,6 @@ are licensed separately (the MX Master 2S renders and the silhouette under
 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), credited to
 **danish_blends**; the MX Vertical renders under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), credited to
-**arc98tect**). They are not covered by
+**arc98tect**; the MX Master 3S pictures under CC BY 4.0, credited to
+**Hayden Schiff**). They are not covered by
 the MIT license.

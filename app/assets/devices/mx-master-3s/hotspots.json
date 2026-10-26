@@ -1,0 +1,76 @@
+{
+  "image": "hero.png",
+  "image_dark": "hero-rim.png",
+  "inset_image": "thumb.png",
+  "top_down_image": "top-down.png",
+  "credit": "MX Master 3S photos by Hayden Schiff (Wikimedia Commons, \"Logitech MX Master 3S HS10\", \"HS17\" and \"HS03\"), licensed CC BY 4.0.",
+  "credit_url": "https://commons.wikimedia.org/wiki/File:Logitech_MX_Master_3S_HS10.jpg",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "credit_changes": "Background removed, printed logo removed, cropped, contact shadow and dark-theme rim light added.",
+  "hotspots": [
+    {
+      "name": "middle",
+      "label": "Middle click",
+      "x": 0.239,
+      "y": 0.446,
+      "side": "left"
+    },
+    {
+      "name": "mode_shift",
+      "label": "Wheel mode",
+      "x": 0.397,
+      "y": 0.279,
+      "side": "left"
+    },
+    {
+      "name": "thumb_wheel",
+      "label": "Thumb wheel",
+      "x": 0.639,
+      "y": 0.344,
+      "side": "right"
+    },
+    {
+      "name": "forward",
+      "label": "Forward",
+      "x": 0.633,
+      "y": 0.497,
+      "side": "right"
+    },
+    {
+      "name": "back",
+      "label": "Back",
+      "x": 0.705,
+      "y": 0.385,
+      "side": "right"
+    },
+    {
+      "name": "gesture",
+      "label": "Gesture button",
+      "x": 0.77,
+      "y": 0.63,
+      "side": "right"
+    }
+  ],
+  "inset_hotspots": [
+    {
+      "name": "thumb_wheel",
+      "label": "Thumb wheel",
+      "x": 0.431,
+      "y": 0.378
+    },
+    {
+      "name": "forward",
+      "label": "Forward",
+      "x": 0.293,
+      "y": 0.723
+    },
+    {
+      "name": "back",
+      "label": "Back",
+      "x": 0.69,
+      "y": 0.723
+    }
+  ],
+  "inset_note": "thumb.png is a magnified, circularly masked crop of the thumb-side photo (HS17); gesture lives on the main image."
+}

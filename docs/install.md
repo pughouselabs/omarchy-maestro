@@ -47,9 +47,9 @@ SHA-256 before building or distributing the recipe. From the repository root,
 after committing the source you want to package:
 
 ```sh
-git archive --format=tar --prefix=maestro-0.3.1/ HEAD | gzip -n > packaging/arch/maestro-0.3.1.tar.gz
+git archive --format=tar --prefix=maestro-0.3.2/ HEAD | gzip -n > packaging/arch/maestro-0.3.2.tar.gz
 cd packaging/arch
-sha256sum maestro-0.3.1.tar.gz
+sha256sum maestro-0.3.2.tar.gz
 updpkgsums
 makepkg --printsrcinfo > .SRCINFO
 makepkg --verifysource

@@ -14,7 +14,7 @@ QtObject {
     preload:root.fixtureMode; printErrors:false
     onLoaded: { try { root.fixtureApplications=JSON.parse(text()) } catch(error) { root.fixtureApplications=[] } }
   }
-  property string versionString:"0.3.1"
+  property string versionString:"0.3.2"
   property FileView versionFile:FileView {
     path:root.queue.repoPath + "/pyproject.toml"; preload:true; printErrors:false
     onLoaded: { const match=text().match(/^version\s*=\s*"([^"]+)"/m); if (match) root.versionString=match[1] }

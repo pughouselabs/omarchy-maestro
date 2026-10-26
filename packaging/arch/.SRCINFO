@@ -1,6 +1,6 @@
 pkgbase = maestro-mouse
 	pkgdesc = Linux settings and controls for Logitech MX mice
-	pkgver = 0.3.1
+	pkgver = 0.3.2
 	pkgrel = 1
 	url = https://github.com/pughouselabs/omarchy-maestro
 	arch = any
@@ -9,7 +9,7 @@ pkgbase = maestro-mouse
 	makedepends = python-build
 	makedepends = python-installer
 	depends = python>=3.10
-	source = maestro-0.3.1.tar.gz
+	source = maestro-0.3.2.tar.gz
 	sha256sums = SKIP
 
 pkgname = maestro-mouse

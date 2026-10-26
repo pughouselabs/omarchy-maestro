@@ -1,7 +1,7 @@
 # Maintainer: Pughouse Labs
 # Local source recipe. Generate and verify checksums before building; see docs/install.md.
 pkgname=maestro-mouse
-pkgver=0.3.1
+pkgver=0.3.2
 pkgrel=1
 pkgdesc='Linux settings and controls for Logitech MX mice'
 arch=('any')

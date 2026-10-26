@@ -9,7 +9,7 @@ import isolation  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 IDENT = "io.github.pughouselabs.maestro"
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -99,7 +99,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             "SKIP",
             "git archive --format=tar",
             "gzip -n",
-            "sha256sum maestro-0.3.1.tar.gz",
+            "sha256sum maestro-0.3.2.tar.gz",
             "updpkgsums",
             "makepkg --verifysource",
         ):

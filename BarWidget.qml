@@ -86,7 +86,10 @@ Ui.BarWidget {
   Component.onDestruction: {
     retiring = true
     if (!queue.busy) return
-    var survivors = peers().filter(function(item) { return item !== root })
+    // A widget from another Maestro version (during an update) may lack recoverQueue.
+    var survivors = peers().filter(function(item) {
+      return item !== root && typeof item.recoverQueue === "function"
+    })
     if (survivors.length) survivors[0].recoverQueue(queue.jobs)
   }
 

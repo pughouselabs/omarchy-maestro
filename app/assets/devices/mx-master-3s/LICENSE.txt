@@ -1,0 +1,10 @@
+hero.png, hero-rim.png and thumb.png are edited from photos by Hayden Schiff on Wikimedia Commons:
+"Logitech MX Master 3S HS10" https://commons.wikimedia.org/wiki/File:Logitech_MX_Master_3S_HS10.jpg
+"Logitech MX Master 3S HS17" https://commons.wikimedia.org/wiki/File:Logitech_MX_Master_3S_HS17.jpg
+top-down.png is edited from "Logitech MX Master 3S HS03" by the same author:
+https://commons.wikimedia.org/wiki/File:Logitech_MX_Master_3S_HS03.jpg
+All licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+Changes: background removed, printed logo removed, cropped and rotated, contact shadow and dark-theme rim light added.
+Not affiliated with or endorsed by Logitech. These images are NOT covered by Maestro's MIT license.
+
+The same license and credit apply to the @1x copies in this folder.
