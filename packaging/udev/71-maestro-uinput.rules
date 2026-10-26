@@ -1,0 +1,6 @@
+# OPTIONAL: only for the maestrod background service (button remapping,
+# gestures, Smart Actions). It lets the user at the active local seat create
+# virtual input devices through /dev/uinput, which means any program running
+# as that user can type or click in the session. Skip this file if you only
+# use the bar widget.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

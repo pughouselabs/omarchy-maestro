@@ -57,10 +57,16 @@ class FakeDevice:
             hidpp.ADJUSTABLE_DPI: 5,
             hidpp.SMART_SHIFT: 6,
             hidpp.HIRES_WHEEL: 7,
+            hidpp.FW_VERSION: 8,
         }
+        self.unit = b"\x8a\x1b\x2c\x3d"  # HID++ 0x0003 unit ID
         self.dpi = 1000
         self.smartshift = [2, 16]
         self.wheel_flags = 2
+        self.write_guard = None
+        # Another FakeDevice that now answers at this one's address (a mouse
+        # paired into the same receiver slot). The write guard still runs here.
+        self.route = None
 
     def name(self):
         return self._name
@@ -75,6 +81,13 @@ class FakeDevice:
         return 4, 5
 
     def call(self, feature, function, params=b"", timeout=1.0):
+        # Same contract as hidpp.Device.call: the guard runs before any write.
+        hidpp.check_write(self, feature, function)
+        if self.route is not None:
+            return self.route.answer(feature, function, params)
+        return self.answer(feature, function, params)
+
+    def answer(self, feature, function, params=b""):
         self.calls.append((feature, function, params))
         if feature == hidpp.DEVICE_NAME and function == 2:
             data = bytes([{"keyboard": 0, "mouse": 3, "trackball": 5}[self.kind]])
@@ -103,6 +116,9 @@ class FakeDevice:
                     self.fail_enable = False
                     raise hidpp.Timeout("lost acknowledgement")
                 data = params
+        elif feature == hidpp.FW_VERSION and function == 0:
+            # entity count, unit ID, transport, model ID
+            data = bytes([1]) + self.unit + b"\x00\x0e" + b"\x40\x69\x00\x00\x00\x00"
         elif feature == hidpp.THUMB_WHEEL:
             if function == 2:
                 self.thumb_mode[:] = params[:2]

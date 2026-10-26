@@ -25,6 +25,8 @@ SHORT_REPORT = 0x10  # 7 bytes
 LONG_REPORT = 0x11  # 20 bytes
 SHORT_LEN = 7
 LONG_LEN = 20
+DRAIN_PACKETS = 8192
+DRAIN_SECONDS = 0.05
 
 DIRECT_INDEX = 0xFF
 HIDPP10_ERROR = 0x8F
@@ -47,6 +49,46 @@ THUMB_WHEEL = 0x2150
 ADJUSTABLE_DPI = 0x2201
 EXTENDED_ADJUSTABLE_DPI = 0x2202
 GESTURE_2 = 0x6501
+
+# Functions that only read. Every other function of any feature counts as a
+# write, so a device's ``write_guard`` sees it (see ``check_write``).
+READ_FUNCTIONS = {
+    ROOT: {0, 1},
+    FEATURE_SET: {0, 1},
+    FW_VERSION: {0, 1, 2},
+    DEVICE_NAME: {0, 1, 2},
+    BATTERY_STATUS: {0, 1},
+    UNIFIED_BATTERY: {0, 1},
+    CHANGE_HOST: {0},
+    REPROG_CONTROLS_V4: {0, 1, 2},
+    VERTICAL_SCROLLING: {0},
+    SMART_SHIFT: {0},
+    SMART_SHIFT_ENHANCED: {0, 1},
+    HIRES_WHEEL: {0, 1},
+    THUMB_WHEEL: {0, 1},
+    ADJUSTABLE_DPI: {0, 1, 2},
+    EXTENDED_ADJUSTABLE_DPI: {0, 1, 2, 5},
+}
+
+
+def is_write(feature_id: int, function: int) -> bool:
+    return function not in READ_FUNCTIONS.get(feature_id, ())
+
+
+def check_write(device, feature_id: int, function: int) -> None:
+    """Run the device's write guard before any call that may change the device.
+
+    The guard raises to refuse the write; nothing is sent then. A device
+    without a guard is read-only (fail closed): every write is refused, so a
+    new write path cannot skip the identity check by forgetting to install one.
+    """
+    if not is_write(feature_id, function):
+        return
+    guard = getattr(device, "write_guard", None)
+    if guard is None:
+        raise Unguarded("no identity check is installed for this mouse; nothing was changed")
+    guard(device, feature_id, function)
+
 
 UNIFYING_PRODUCTS = {0xC52B, 0xC532}
 BOLT_PRODUCTS = {0xC548}
@@ -71,6 +113,10 @@ class HidppError(Exception):
 
 class NoResponse(Exception):
     """The device is not reachable (unpaired, switched off, or out of range)."""
+
+
+class Unguarded(NoResponse):
+    """A write was attempted on a device without an identity guard; nothing was sent."""
 
 
 class Timeout(NoResponse):
@@ -164,12 +210,24 @@ class Channel:
         self._swid = self._swid % 15 + 1
         return self._swid
 
-    def _drain(self) -> None:
-        while True:
+    def _capture(self, data: bytes) -> None:
+        """Event channels retain notifications; discovery discards stale reports."""
+
+    def _drain(self, deadline: float | None = None) -> None:
+        end = time.monotonic() + DRAIN_SECONDS
+        if deadline is not None:
+            end = min(end, deadline)
+        for _ in range(DRAIN_PACKETS):
+            if time.monotonic() >= end:
+                raise Timeout(f"hidraw stream did not drain on {self.path}")
             try:
-                os.read(self.fd, 64)
+                data = os.read(self.fd, 64)
             except BlockingIOError:
                 return
+            if not data:
+                raise NoResponse(f"hidraw channel closed on {self.path}")
+            self._capture(data)
+        raise Timeout(f"hidraw stream did not drain on {self.path}")
 
     def _read(self, deadline: float) -> bytes | None:
         remaining = deadline - time.monotonic()
@@ -179,7 +237,10 @@ class Channel:
         if not ready:
             return None
         try:
-            return os.read(self.fd, 64)
+            data = os.read(self.fd, 64)
+            if not data:
+                raise NoResponse(f"hidraw channel closed on {self.path}")
+            return data
         except BlockingIOError:
             return b""
         except OSError as e:
@@ -202,12 +263,14 @@ class Channel:
         func_byte = ((function & 0x0F) << 4) | swid
         message = bytes([LONG_REPORT, index, feature_index, func_byte]) + params
         message = message.ljust(LONG_LEN, b"\x00")
+        deadline = time.monotonic() + timeout
         try:
-            self._drain()
+            self._drain(deadline)
+            if time.monotonic() >= deadline:
+                raise Timeout(f"request expired while draining {self.path}")
             os.write(self.fd, message)
         except OSError as e:
             raise NoResponse(f"device disconnected on {self.path}: {e.strerror}") from e
-        deadline = time.monotonic() + timeout
         while True:
             try:
                 reply = self._read(deadline)
@@ -245,12 +308,14 @@ class Channel:
             raise ValueError("invalid receiver slot or type")
         subregister = (0x20 + slot - 1) if connection == "unifying" else (0x50 + slot)
         message = bytes((SHORT_REPORT, DIRECT_INDEX, 0x83, 0xB5, subregister, 0, 0))
+        deadline = time.monotonic() + timeout
         try:
-            self._drain()
+            self._drain(deadline)
+            if time.monotonic() >= deadline:
+                raise Timeout(f"pairing request expired while draining {self.path}")
             os.write(self.fd, message)
         except OSError as e:
             raise NoResponse(f"receiver disconnected on {self.path}: {e.strerror}") from e
-        deadline = time.monotonic() + timeout
         while True:
             try:
                 reply = self._read(deadline)
@@ -302,6 +367,8 @@ class Device:
     model: str | None = None
     writable: bool = True
     _features: dict[int, int | None] = field(default_factory=dict)
+    # Set by the service: checks the mouse's identity before every write.
+    write_guard: object = field(default=None, repr=False, compare=False)
 
     def ping(self, timeout: float = 0.6) -> tuple[int, int]:
         """Returns the HID++ protocol version; raises NoResponse if absent."""
@@ -327,6 +394,9 @@ class Device:
             idx = self.feature_index(feature_id)
             if idx is None:
                 raise HidppError(f"feature {feature_id:#06x} not supported")
+        # Last step before sending: a feature lookup above is a device
+        # transaction too, so the identity check must come after it.
+        check_write(self, feature_id, function)
         return self.channel.request(self.index, idx, function, params, timeout=timeout)
 
     # ----- identity -------------------------------------------------------

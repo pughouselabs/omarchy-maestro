@@ -16,8 +16,81 @@ from maestro import hidpp, mouse
 from maestro.daemon import ipc
 from maestro.daemon.actions import Actions
 from maestro.daemon.config import ConfigFile
+from maestro.daemon.events import IDENTITY_PROBLEM
 from maestro.daemon.profiles import resolve
 from maestro.daemon.service import Daemon, MouseSession
+
+
+class OfflineIdentityTests(unittest.TestCase):
+    """Without the service, CLI writes pass the same unit ID check before each write."""
+
+    COMMANDS = (
+        ["dpi", "1200"],
+        ["smartshift", "--threshold", "20"],
+        ["smartshift", "--mode", "freespin"],
+        ["scroll", "--invert", "on"],
+        ["scroll", "--invert", "off"],
+    )
+
+    def run_cli(self, device, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            patch.object(ipc, "request_if_running", return_value=None),
+            patch.object(mouse, "find_mice", return_value=[device]),
+            patch.object(hidpp, "close_devices"),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = cli.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def writes(self, device):
+        return [c for c in device.calls if hidpp.is_write(*c[:2])]
+
+    def unit_reads(self, device):
+        return [c for c in device.calls if c[0] == hidpp.FW_VERSION]
+
+    def test_unreadable_unit_id_writes_nothing(self):
+        for argv in self.COMMANDS:
+            with self.subTest(argv=argv):
+                device = FakeDevice()
+                device.wheel_flags = 6  # so "off" would also be a change
+                device.unit = b"\0\0\0\0"
+                code, out, err = self.run_cli(device, argv)
+                self.assertEqual(code, 2)
+                self.assertEqual(out, "")
+                self.assertIn(IDENTITY_PROBLEM, err)
+                self.assertEqual(self.writes(device), [])
+
+    def test_readable_unit_id_works_as_before(self):
+        expected = ["1200\n", "ratchet 20\n", "freespin 16\n", "inverted\n", "normal\n"]
+        for argv, output in zip(self.COMMANDS, expected, strict=True):
+            with self.subTest(argv=argv):
+                device = FakeDevice()
+                device.wheel_flags = 6
+                code, out, err = self.run_cli(device, argv)
+                self.assertEqual((code, err, out), (0, "", output))
+                writes = self.writes(device)
+                self.assertTrue(writes)
+                # One read at open, then one before each write.
+                self.assertEqual(len(self.unit_reads(device)), 1 + len(writes))
+
+    def test_a_mouse_swapped_after_open_gets_no_write(self):
+        real = cli.guard_device
+
+        def open_then_swap(device):
+            gate = real(device)
+            device.unit = b"\x01\x02\x03\x04"
+            return gate
+
+        for argv in self.COMMANDS:
+            with self.subTest(argv=argv), patch.object(cli, "guard_device", open_then_swap):
+                device = FakeDevice()
+                device.wheel_flags = 6
+                code, out, err = self.run_cli(device, argv)
+                self.assertEqual(code, 2)
+                self.assertIn("device identity changed", err)
+                self.assertEqual(self.writes(device), [])
 
 
 class CLIRoutingTests(unittest.TestCase):
@@ -56,6 +129,49 @@ class CLIRoutingTests(unittest.TestCase):
             self.assertEqual(device.dpi, 1200)
             self.assertEqual(device.smartshift[1], 20)
             self.assertEqual(device.wheel_flags & 4, 4)
+
+    def test_status_lists_a_disconnected_mouse_instead_of_failing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            daemon = Daemon(ConfigFile(Path(directory) / "config.json"))
+            daemon.actions = Actions(FakeOutput())
+            self.addCleanup(daemon.close)
+            device = FakeDevice()
+            session = MouseSession(device, daemon.actions)
+            daemon.sessions.append(session)
+            daemon.devices.append(device)
+            session.configure(resolve({}, session.identity))
+            online = daemon.handle({"op": "status"})["devices"][0]
+
+            def gone():
+                raise hidpp.NoResponse("device did not answer")
+
+            # The mouse stops answering (turned off, asleep or out of range).
+            session.diversion.guard = gone
+            offline = daemon.handle({"op": "status"})["devices"][0]
+            # Same shape as a connected mouse, marked offline.
+            self.assertLessEqual(set(online), set(offline))
+            self.assertIs(offline["receiver"], True)
+            self.assertIs(offline["online"], False)
+            self.assertEqual(offline["error"], "device did not answer")
+
+            def exchange(message):
+                return json.loads(json.dumps(daemon.handle(json.loads(json.dumps(message)))))
+
+            with patch.object(ipc, "request_if_running", side_effect=exchange):
+                code, output, error = self.invoke(["status"])
+            self.assertEqual(code, 0, error)
+            self.assertIn("receiver slot 1", output)
+            self.assertIn("disconnected", output)
+
+    def test_status_printing_tolerates_missing_keys(self):
+        # An older service may send a disconnected mouse with only a few keys.
+        sparse = {"name": "MX Master 2S", "path": "/dev/hidraw4", "index": 1, "error": "gone"}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli._print_status([sparse, {"index": 2}], [0, 1])
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], "[0] MX Master 2S  (/dev/hidraw4)  disconnected")
+        self.assertEqual(lines[1], "[1] Logitech mouse  (unknown path)")
 
     def invoke(self, argv):
         stdout, stderr = io.StringIO(), io.StringIO()

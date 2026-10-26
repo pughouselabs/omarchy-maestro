@@ -14,26 +14,33 @@ from maestro import hidpp, mouse
 
 from .actions import Actions
 from .catalog import catalog as action_catalog
-from .catalog import control_device
+from .catalog import control_device, device_selector, valid_selector
 from .config import (
     ConfigError,
     ConfigFile,
     full_config,
+    read_config_file,
     validate_action,
     validate_expanded_action,
     validate_settings,
 )
 from .events import (
+    IDENTITY_PROBLEM,
     WIRELESS_DEVICE_STATUS,
+    ControlBusy,
     Diversion,
     IdentityChanged,
+    RecordFailed,
+    Unidentified,
     adopt_channels,
     decode,
     same_endpoint,
     supported_device,
+    write_batch,
 )
 from .gestures import Gesture, WheelAccumulator
 from .ipc import Server
+from .ownership import DiversionLedger, device_key, find_other_owner, selector_tag
 from .profiles import resolve, setting_rule
 from .uinput import UInput
 from .windows import Windows
@@ -42,24 +49,43 @@ LOG = logging.getLogger("maestrod")
 DEVICE_ERRORS = (hidpp.HidppError, hidpp.NoResponse, OSError, ValueError)
 
 
+STARTUP_CONFLICTS = ("solaar", "logid", "logiops")
+# Display names, and the verb that fits: Solaar is an app, logiops a service.
+OWNER_NAMES = {
+    "solaar": ("Solaar", "Close"),
+    "logid": ("logiops", "Stop"),
+    "logiops": ("logiops", "Stop"),
+}
+OWNER_RECHECK = 15  # seconds between checks while another app owns HID++
+
+
 def check_other_owners(proc=Path("/proc")):
-    for entry in proc.iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            comm = (entry / "comm").read_text().strip()
-            args = (entry / "cmdline").read_bytes().split(b"\0")[:2]
-            names = {comm} | {Path(a.decode(errors="replace")).name for a in args}
-        except OSError:
-            continue
-        if names & {"solaar", "logid", "logiops"}:
-            raise RuntimeError(f"stop Solaar/logiops before running maestrod (PID {entry.name})")
+    """Display name of a running app that owns HID++ (Solaar, logiops), else None.
+
+    Only the app name leaves this function; process IDs and arguments do not.
+    """
+    found = find_other_owner(proc, STARTUP_CONFLICTS)
+    return None if found is None else OWNER_NAMES.get(found[1], (found[1], "Close"))[0]
+
+
+def owner_problem(name):
+    verb = next((v for n, v in OWNER_NAMES.values() if n == name), "Close")
+    return f"{name} is running and controls the mouse. {verb} {name} to use Maestro."
 
 
 def apply_settings(device, settings, before_write=None):
-    """Skip equal settings; preserve every option the config does not own."""
+    """Skip equal settings; preserve every option the config does not own.
+
+    Every write passes the device's unit gate. A mouse that is no longer the
+    session's (or cannot be identified) raises before anything is written.
+    """
     if not supported_device(device) or not getattr(device, "writable", False):
         return ["mouse identity could not be verified; writes are disabled"]
+    with write_batch(device):
+        return _apply_settings(device, settings, before_write)
+
+
+def _apply_settings(device, settings, before_write):
     errors = []
     for key, value in settings.items():
         try:
@@ -88,6 +114,8 @@ def apply_settings(device, settings, before_write=None):
                         raise ValueError(
                             "scroll direction readback differs from the requested value"
                         )
+        except (IdentityChanged, Unidentified):
+            raise
         except DEVICE_ERRORS as exc:
             errors.append(f"{key}: {exc}")
     return errors
@@ -123,10 +151,12 @@ def restore_hardware(snapshots):
         if not session.validate_identity():
             errors.append(f"{session.diversion.name}: identity changed; hardware rollback skipped")
             continue
-        errors.extend(
-            f"{session.diversion.name}: {error}"
-            for error in apply_settings(session.device, settings)
-        )
+        try:
+            failed = apply_settings(session.device, settings)
+        except DEVICE_ERRORS as exc:
+            session.identity_failed(exc)
+            failed = [f"hardware rollback skipped: {exc}"]
+        errors.extend(f"{session.diversion.name}: {error}" for error in failed)
     return errors
 
 
@@ -148,6 +178,33 @@ def confirm_settings(actual, requested, raw, identity, *, readback=False):
                 raise ValueError(f"{label} request is overridden by {rule}: {observed!r}")
 
 
+def offline_status(device, exc):
+    """The full status shape for a mouse that did not answer, marked offline.
+
+    Every key mouse.status() always sends is present, so readers never need
+    to special-case a disconnected mouse.
+    """
+    node = device.node
+    wpid = getattr(device, "wpid", None)
+    try:
+        name = device.name()
+    except DEVICE_ERRORS:
+        name = getattr(device, "reported_name", None) or device.model or "Logitech mouse"
+    return {
+        "name": name,
+        "path": node.path,
+        "index": device.index,
+        "receiver": bool(getattr(node, "is_receiver", False)),
+        "connection": getattr(node, "connection", None),
+        "wpid": f"{wpid:04X}" if wpid is not None else None,
+        "model": device.model,
+        "supported": supported_device(device),
+        "online": False,
+        "error": str(exc),
+        **{key: None for key in ("battery", "dpi", "smartshift", "wheel", "thumb_wheel", "host")},
+    }
+
+
 def device_identity(device):
     return (
         device.node.bus,
@@ -160,11 +217,11 @@ def device_identity(device):
 
 
 class MouseSession:
-    def __init__(self, device, actions, endpoint_guard=None):
+    def __init__(self, device, actions, endpoint_guard=None, ledger=None):
         self.device = device
         self.original_identity = device_identity(device)
         self.actions = actions
-        self.diversion = Diversion(device, guard=endpoint_guard)
+        self.diversion = Diversion(device, guard=endpoint_guard, ledger=ledger)
         self.identity = {
             "name": self.diversion.name,
             "path": device.node.path,
@@ -189,6 +246,8 @@ class MouseSession:
         self.errors = []
         self.setting_errors = []
         self.binding_errors = []
+        self.busy = {}  # cid or "thumb" -> ControlBusy held by another app
+        self.record_problem = None  # set while the ownership record cannot be saved
         self.before_write = None
         self.last_reconnect = -100
 
@@ -198,17 +257,76 @@ class MouseSession:
             self.suspend("read_only", "mouse identity could not be verified; writes are disabled")
             self.options = options
             return
+        if self.diversion.unit_key is None:
+            # No unit ID when the mouse was opened: read-only for good.
+            self.suspend("unidentified", IDENTITY_PROBLEM)
+            self.options = options
+            return
         if self.pressed and self.online and self.verified:
             if not self.validate_identity():
                 return
             self.pending = (options, force)
             return
         try:
-            self._configure(options, force or not self.online or not self.verified)
+            with self.diversion.gate.batch():
+                self._configure(options, force or not self.online or not self.verified)
+        except (IdentityChanged, Unidentified) as exc:
+            self.identity_failed(exc)
+        except (*DEVICE_ERRORS, ControlBusy, RecordFailed) as exc:
+            self.suspend("uncertain", str(exc))
+
+    def identity_failed(self, exc):
+        """Suspend after the unit gate refused a write (or could not identify the mouse)."""
+        if isinstance(exc, IdentityChanged):
+            self.suspend("changed", str(exc))
+        elif isinstance(exc, Unidentified):
+            self.suspend("unidentified", IDENTITY_PROBLEM)
+        else:
+            self.suspend("uncertain", str(exc))
+
+    @property
+    def problem(self):
+        """One plain status line when a control is unavailable, else None."""
+        if self.identity_state == "unidentified" or self.diversion.unit_key is None:
+            return IDENTITY_PROBLEM
+        if self.record_problem:
+            return self.record_problem
+        return next((exc.status for exc in self.busy.values()), None)
+
+    def release_buttons(self, expected=None, *, required=False):
+        """Explicit recovery requested by the user; then take the controls over.
+
+        The live unit ID is read first; a mouse that is no longer the one this
+        session opened (or whose ID cannot be read) gets no write at all.
+        """
+        if self.pressed:
+            raise ValueError("release the mouse buttons first, then try again")
+        try:
+            released = self.diversion.release_leftovers(expected, required=required)
         except IdentityChanged as exc:
             self.suspend("changed", str(exc))
+            raise ValueError("device identity changed; read status and retry") from exc
         except DEVICE_ERRORS as exc:
-            self.suspend("uncertain", str(exc))
+            self.identity_failed(exc)
+            raise
+        self.busy = {}
+        if self.requested is not None:
+            self.configure(self.requested, force=True)
+        return released
+
+    def abandon(self):
+        """Forget this session's diversions without any HID++ write.
+
+        Used when a different physical mouse now answers at this session's
+        position. The ownership record is left as it is, so the original
+        mouse is still reported (and released only on request) if it returns.
+        """
+        self.diversion.owned.clear()
+        self.diversion.flags.clear()
+        self.diversion.thumb_owned = False
+        self.diversion.thumb_flags = None
+        self.diversion.leftovers.clear()
+        self.busy = {}
 
     def suspend(self, state="uncertain", reason="mouse identity needs re-verification"):
         # Revoke action permission before releasing input. Ownership of mouse
@@ -233,6 +351,14 @@ class MouseSession:
 
     def _configure(self, options, force=False):
         self.diversion.check_endpoint()
+        # A reconnect can be a different mouse of the same model in the same
+        # receiver slot. Confirm the live unit ID before the first write (the
+        # unit gate would refuse the write anyway; this fails before any work).
+        self.diversion.verify_unit()
+        # Note what an earlier Maestro run left diverted on this same mouse (a
+        # crash or power loss can keep it diverted). Nothing is released here;
+        # only the user's explicit Release button does that.
+        self.diversion.check_leftovers()
         self.pending = None
         self.setting_errors = apply_settings(
             self.device, options["settings"], before_write=self.before_write
@@ -264,11 +390,26 @@ class MouseSession:
         for cid in list(self.diversion.owned):
             if cid not in desired or self.diversion.owned[cid] != desired[cid]:
                 self.diversion.disable(cid)
+        busy = {}
+        record_problem = None
         for cid, raw in desired.items():
-            if force and cid in self.diversion.owned:
-                self.diversion._set(cid, True, raw)
-            else:
-                self.diversion.enable(cid, raw)
+            try:
+                if force and cid in self.diversion.owned:
+                    self.diversion.reassert(cid)
+                else:
+                    self.diversion.enable(cid, raw)
+            except (ControlBusy, RecordFailed) as exc:
+                # Another app owns it, or ownership could not be recorded.
+                # Leave it untouched; everything else works.
+                if isinstance(exc, ControlBusy):
+                    busy[cid] = exc
+                else:
+                    record_problem = exc.status
+                bindings.pop(cid, None)
+                if gesture_cid == cid:
+                    gesture_cid = None
+                if exc.status not in self.errors:
+                    self.errors.append(exc.status)
         thumb_divert = options["thumb_wheel"]["mode"] != "horizontal"
         if thumb_divert and self.indexes.get(hidpp.THUMB_WHEEL) is None:
             self.errors.append(
@@ -277,7 +418,21 @@ class MouseSession:
             )
             thumb_divert = False
         if thumb_divert or self.diversion.thumb_owned:
-            self.diversion.thumb(thumb_divert)
+            try:
+                self.diversion.thumb(thumb_divert)
+            except ControlBusy as exc:
+                busy["thumb"] = exc
+                self.errors.append(exc.status)
+            except RecordFailed as exc:
+                record_problem = exc.status
+                if exc.status not in self.errors:
+                    self.errors.append(exc.status)
+        if busy and busy.keys() != self.busy.keys():
+            LOG.warning("%s: %s", self.diversion.name, "; ".join(str(exc) for exc in busy.values()))
+        if record_problem and not self.record_problem:
+            LOG.error("%s: %s", self.diversion.name, record_problem)
+        self.busy = busy
+        self.record_problem = record_problem
         self.diversion.check_endpoint()
         self.options = options
         self.bindings = bindings
@@ -354,6 +509,9 @@ class MouseSession:
         if not self.device.writable:
             self.suspend("read_only", "mouse identity could not be verified; writes are disabled")
             return
+        if self.diversion.unit_key is None:
+            self.suspend("unidentified", IDENTITY_PROBLEM)
+            return
         if not self.validate_identity() or self.pressed:
             return
         try:
@@ -361,12 +519,20 @@ class MouseSession:
             if not self.online or not self.verified or self.pending is not None:
                 self.configure(options, force=True)
                 return
-            reset = any(
+            self.diversion.retry_record()
+            reset = self.record_problem is not None
+            reset |= any(
                 self.diversion.reporting(cid) & (0x11 if raw else 1) != (0x11 if raw else 1)
                 for cid, raw in self.diversion.owned.items()
             )
             if self.diversion.thumb_owned:
                 reset |= not bool(self.device.call(hidpp.THUMB_WHEEL, 1)[0] & 1)
+            # Retry a control another app held once that app lets it go.
+            for cid in self.busy:
+                if cid == "thumb":
+                    reset |= not self.device.call(hidpp.THUMB_WHEEL, 1)[0] & 1
+                else:
+                    reset |= not self.diversion.reporting(cid) & 0x15
             if reset:
                 self.configure(options, force=True)
             else:
@@ -376,29 +542,60 @@ class MouseSession:
                     LOG.error(
                         "%s settings: %s", self.diversion.name, "; ".join(self.setting_errors)
                     )
-        except IdentityChanged as exc:
-            self.suspend("changed", str(exc))
-        except DEVICE_ERRORS as exc:
+        except (IdentityChanged, Unidentified) as exc:
+            self.identity_failed(exc)
+        except (*DEVICE_ERRORS, ControlBusy, RecordFailed) as exc:
             self.suspend(reason=str(exc))
 
     def close(self):
+        """Undo this session's diversions, only on the mouse that was diverted.
+
+        The live unit ID must match first. A different or unreadable one skips
+        cleanup with nothing written: the other mouse's buttons are not ours
+        to change, and the record keeps this mouse's entry so it is reported
+        (and released on request) when it returns.
+        """
         try:
             self.suspend("closing", "daemon is stopping")
         finally:
-            # A failed pairing read is not permission to forget a diverted
-            # control. Each retry still verifies the original endpoint.
-            for _ in range(3):
-                errors = self.diversion.close()
-                if not self.diversion.owned and not self.diversion.thumb_owned:
-                    break
+            errors = []
+            if self.diversion.owned or self.diversion.thumb_owned:
+                with self.diversion.gate.batch():
+                    try:
+                        self.diversion.verify_unit()
+                    except DEVICE_ERRORS as exc:
+                        self.abandon()
+                        errors = [f"cleanup skipped: {exc}"]
+                    else:
+                        # A failed pairing read is not permission to forget a
+                        # diverted control. Each retry still checks the endpoint.
+                        # Every write, including each retry, rereads the unit
+                        # ID first; one refusal ends cleanup with nothing more
+                        # written and this mouse's record kept.
+                        for _ in range(3):
+                            try:
+                                errors = self.diversion.close()
+                            except (IdentityChanged, Unidentified) as exc:
+                                self.abandon()
+                                errors = [f"cleanup stopped: {exc}"]
+                                break
+                            if not self.diversion.owned and not self.diversion.thumb_owned:
+                                break
         return errors
 
 
 class Daemon:
     def __init__(
-        self, config=None, output_factory=UInput, discover=None, windows=None, server_factory=Server
+        self,
+        config=None,
+        output_factory=UInput,
+        discover=None,
+        windows=None,
+        server_factory=Server,
+        ledger=None,
     ):
         self.config = config or ConfigFile()
+        self.ledger = ledger if ledger is not None else DiversionLedger()
         self.output_factory = output_factory
         self.discover = discover
         self.windows = windows or Windows()
@@ -408,12 +605,71 @@ class Daemon:
         self.retired_sessions = []
         self.failed_channels = set()
         self.devices = []
+        self.unidentified = set()  # (path, index) of mice whose unit ID cannot be read
         self.sleeping = []
         self.scan_errors = []
         self.reload_error = None
         self.stop = self.reload_requested = False
         self.closed = False
         self.window = {}
+        self.paused_by = None  # display name of another HID++ owner while paused
+
+    @property
+    def paused_problem(self):
+        return owner_problem(self.paused_by) if self.paused_by else None
+
+    def pause(self, owner):
+        """Hand the mice to another HID++ owner: release them and stop all HID++.
+
+        Diversions are undone exactly as at shutdown, then every hidraw handle
+        is closed. Discovery resumes once the other app is gone.
+        """
+        first = self.paused_by is None
+        self.paused_by = owner
+        if not first:
+            return
+        LOG.warning(
+            "%s Waiting; checking again every %s seconds.", owner_problem(owner), OWNER_RECHECK
+        )
+        self._release_mice()
+
+    def resume(self):
+        if self.paused_by is None:
+            return
+        LOG.info("%s is no longer running; resuming", self.paused_by)
+        self.paused_by = None
+
+    def check_owner(self):
+        """Pause or resume on another HID++ owner. True while paused."""
+        owner = check_other_owners()
+        if owner:
+            self.pause(owner)
+            return True
+        self.resume()
+        return False
+
+    def _release_mice(self):
+        if self.actions is not None:
+            try:
+                self.actions.cancel_all()
+            except Exception:
+                LOG.exception("could not cancel running actions")
+        for session in self.sessions + self.retired_sessions:
+            try:
+                errors = session.close()
+                if errors:
+                    LOG.error("cleanup %s: %s", session.identity["name"], "; ".join(errors))
+            except Exception:
+                LOG.exception("cleanup failed for %s", session.identity["name"])
+        try:
+            hidpp.close_devices(
+                self.devices + [s.device for s in self.sessions + self.retired_sessions]
+            )
+        finally:
+            self.sessions, self.retired_sessions, self.devices = [], [], []
+            self.sleeping, self.scan_errors = [], []
+            self.unidentified = set()
+            self.failed_channels = set()
 
     def options(self, session):
         return resolve(self.config.raw, session.identity, self.window)
@@ -461,11 +717,13 @@ class Daemon:
         sleeping = {(s.path, s.index): s for s in scan.sleeping}
         catalog = []
         new = []
+        unverified = set()  # held positions whose unit ID could not be read: no session
         adopt_channels(found)
         try:
             for device in found:
                 key = (device.node.path, device.index)
                 previous = existing.pop(key, None)
+                unit, unit_read = None, False
                 if previous is not None:
                     old = previous.device
                     if not device.writable:
@@ -475,16 +733,34 @@ class Daemon:
                     if previous.original_identity != device_identity(device):
                         self._retire(previous)
                         previous = None
+                    else:
+                        # Same model and receiver slot is not the same mouse:
+                        # a replacement paired into the slot has another unit ID.
+                        unit, unit_read = selector_tag(device_key(device)), True
+                        if unit != previous.diversion.unit_key:
+                            if unit is None:
+                                unverified.add(key)
+                            self._retire_replaced(previous, unit is None)
+                            previous = None
                 if previous is None:
-                    previous = next(
-                        (
-                            s
-                            for s in self.retired_sessions
-                            if (s.device.node.path, s.device.index) == key
-                            and s.original_identity == device_identity(device)
-                        ),
-                        None,
-                    )
+                    for s in list(self.retired_sessions):
+                        if (s.device.node.path, s.device.index) != key or (
+                            s.original_identity != device_identity(device)
+                        ):
+                            continue
+                        if not unit_read:
+                            unit, unit_read = selector_tag(device_key(device)), True
+                        if unit is None:
+                            # Still unidentified: keep holding the slot, scan
+                            # after scan, until the unit ID reads back.
+                            unverified.add(key)
+                        elif previous is None and unit == s.diversion.unit_key:
+                            previous = s  # the same mouse is back
+                        else:
+                            # A different, verified mouse now sits in its slot:
+                            # never undivert its buttons on the old one's behalf.
+                            self.retired_sessions.remove(s)
+                            s.abandon()
                     if previous is not None:
                         self.retired_sessions.remove(previous)
                         self.sessions.append(previous)
@@ -509,7 +785,10 @@ class Daemon:
                     catalog.append(previous.device)
                     continue
                 catalog.append(device)
-                if supported_device(device):
+                # A slot held for a mouse whose unit ID cannot be read gets no
+                # session until the ID reads back. Any other mouse without a
+                # readable unit ID gets a read-only session (see UnitGate).
+                if supported_device(device) and key not in unverified:
                     new.append(device)
             for key, previous in existing.items():
                 asleep = sleeping.get(key)
@@ -527,8 +806,20 @@ class Daemon:
                     else:
                         catalog.append(previous.device)
             self.devices = catalog
+            self.unidentified = unverified
             for device in new:
-                session = MouseSession(device, self.actions, endpoint_guard=self._guard(device))
+                try:
+                    session = MouseSession(
+                        device,
+                        self.actions,
+                        endpoint_guard=self._guard(device),
+                        ledger=self.ledger,
+                    )
+                except DEVICE_ERRORS as exc:
+                    # One unreadable mouse must not stop the daemon; the next
+                    # scan retries it.
+                    LOG.warning("could not open %s: %s", device.node.path, exc)
+                    continue
                 # Record ownership before configure can perform the first write.
                 self.sessions.append(session)
                 session.configure(self.options(session))
@@ -556,6 +847,32 @@ class Daemon:
             # because a probe of its receiver slot failed.
             self.retired_sessions.append(session)
 
+    def _retire_replaced(self, session, unverified):
+        """Retire a session whose slot now reports another (or no) unit ID.
+
+        Nothing is written to the mouse there. A different verified mouse
+        drops the old session's diversions from memory (its record stays for
+        when it returns). An unreadable ID keeps them retired, unused, until
+        the same unit ID reads back again.
+        """
+        LOG.warning(
+            "%s at %s slot %s: %s",
+            session.identity["name"],
+            session.identity["path"],
+            session.identity["index"],
+            "unit ID unreadable; holding until it can be verified"
+            if unverified
+            else "a different mouse of the same model replaced it",
+        )
+        if not unverified:
+            session.abandon()
+        self._retire(session)
+
+    def _pause_fields(self):
+        if not self.paused_by:
+            return {}
+        return {"paused_by": self.paused_by, "problem": self.paused_problem}
+
     def handle(self, message):
         op = message.get("op")
         if op not in (
@@ -571,9 +888,14 @@ class Daemon:
             "config_restore",
             "config_undo",
             "test_action",
+            "release_buttons",
         ):
             raise ValueError("unknown IPC operation")
         allowed = {"op"} if op != "set" else {"op", "device", "settings", "selector"}
+        if op in ("controls", "release_buttons"):
+            allowed.add("device")
+        if op == "release_buttons":
+            allowed.add("selector")
         if op == "diagnose":
             allowed.add("devices")
         if op == "config_apply":
@@ -584,6 +906,8 @@ class Daemon:
             allowed.add("action")
         if set(message) - allowed:
             raise ValueError("unknown IPC field")
+        if self.paused_by and op in ("set", "release_buttons"):
+            raise RuntimeError(self.paused_problem)
         if op == "reload":
             if not self.refresh_config():
                 raise ConfigError(self.reload_error)
@@ -596,7 +920,9 @@ class Daemon:
             return {"ok": True, "backups": self.config.backups()}
         if op in ("config_apply", "config_restore", "config_undo"):
             previous = copy.deepcopy(self.config.raw)
-            previous_bytes = self.config.path.read_bytes() if self.config.path.exists() else b"{}\n"
+            previous_bytes = (
+                read_config_file(self.config.path) if self.config.path.exists() else b"{}\n"
+            )
             name = (
                 self.config.apply(message.get("config"))
                 if op == "config_apply"
@@ -649,23 +975,75 @@ class Daemon:
                 self.actions.execute(action)
             return {"ok": True}
         if op == "controls":
+            # The device list leaves out resolved options so the response stays
+            # bounded with several mice; the app reads one mouse's options with
+            # "device", which is bounded by the configuration budget.
+            selected = message.get("device")
+            physical = self.devices or [s.device for s in self.sessions]
+            if selected is not None and (
+                type(selected) is not int or not 0 <= selected < len(physical)
+            ):
+                raise ValueError("device must be an available zero-based device number")
             devices = self.handle({"op": "status"})["devices"]
             sessions = {id(s.device): s for s in self.sessions}
-            physical = self.devices or [s.device for s in self.sessions]
             return {
                 "ok": True,
                 "daemon": True,
+                **self._pause_fields(),
                 "devices": [
                     control_device(
                         status,
                         i,
                         getattr(sessions.get(id(physical[i])), "diversion", None),
-                        self.config.raw,
+                        self.config.raw if selected is not None else None,
+                        include_options=selected is not None,
                     )
                     for i, status in enumerate(devices)
-                    if status.get("supported")
+                    if status.get("supported") and selected in (None, i)
                 ],
             }
+        if op == "release_buttons":
+            selected = message.get("device")
+            physical = self.devices or [s.device for s in self.sessions]
+            if selected is not None and (
+                type(selected) is not int or not 0 <= selected < len(physical)
+            ):
+                raise ValueError("device must be an available zero-based device number")
+            # A device number alone can point at another mouse after
+            # discovery changes, so a targeted release must name the mouse it
+            # was chosen as, and is refused before any write if that changed.
+            selector = message.get("selector")
+            if selected is not None and not valid_selector(selector):
+                raise ValueError("release_buttons with device needs its selector from controls")
+            if selected is None and selector is not None:
+                raise ValueError("selector needs a device number")
+            sessions = {id(s.device): s for s in self.sessions}
+            results = []
+            for i, device in enumerate(physical):
+                session = sessions.get(id(device))
+                if selected not in (None, i) or session is None:
+                    continue
+                if selector is not None and selector != device_selector(
+                    device.node.path, device.index, device.model, session.diversion.unit_key
+                ):
+                    raise ValueError("device identity changed; read status and retry")
+                if not session.validate_identity():
+                    raise hidpp.NoResponse(session.errors[0])
+                results.append(
+                    {
+                        "device": i,
+                        "model": session.device.model,
+                        # The cached tag above can be stale after a same-model
+                        # swap; this rereads the live unit ID before any write.
+                        "released": session.release_buttons(
+                            selector["unit"] if selector is not None else None,
+                            required=selector is not None,
+                        ),
+                    }
+                )
+            if selected is not None and not results:
+                raise ValueError("unsupported Logitech device; writes are disabled for this mouse")
+            return {"ok": True, "devices": results}
         if op == "status":
             devices = []
             sessions = {id(s.device): s for s in self.sessions}
@@ -679,14 +1057,7 @@ class Daemon:
                     if session:
                         state = "changed" if isinstance(exc, IdentityChanged) else "uncertain"
                         session.suspend(state, str(exc))
-                    info = {
-                        "name": device.name(),
-                        "path": device.node.path,
-                        "index": device.index,
-                        "model": device.model,
-                        "supported": supported_device(device),
-                        "error": str(exc),
-                    }
+                    info = offline_status(device, exc)
                 info["writable"] = device.writable
                 if session:
                     info.update(
@@ -696,6 +1067,12 @@ class Daemon:
                         diverted_controls=sorted(session.diversion.owned),
                         thumb_diverted=session.diversion.thumb_owned,
                     )
+                    if session.problem:
+                        info["problem"] = session.problem
+                    info["release_available"] = bool(session.busy)
+                    info["unit_key"] = session.diversion.unit_key
+                elif (device.node.path, device.index) in self.unidentified:
+                    info["problem"] = IDENTITY_PROBLEM
                 devices.append(info)
             return {
                 "ok": True,
@@ -705,6 +1082,7 @@ class Daemon:
                 "window_error": self.windows.error,
                 "sleeping": [vars(s) for s in self.sleeping],
                 "scan_errors": self.scan_errors,
+                **self._pause_fields(),
             }
         catalog = self.devices or [s.device for s in self.sessions]
         if op == "diagnose":
@@ -749,6 +1127,9 @@ class Daemon:
                 "read_only", "mouse identity could not be verified; writes are disabled"
             )
             raise ValueError(session.errors[0])
+        if session.diversion.unit_key is None:
+            session.suspend("unidentified", IDENTITY_PROBLEM)
+            raise ValueError(IDENTITY_PROBLEM)
         if not session.validate_identity():
             raise hidpp.NoResponse(session.errors[0])
         if not session.online or not session.verified:
@@ -776,7 +1157,11 @@ class Daemon:
         original_options = session.options
         persisted = False
         try:
-            errors = apply_settings(session.device, settings)
+            try:
+                errors = apply_settings(session.device, settings)
+            except (IdentityChanged, Unidentified) as exc:
+                session.identity_failed(exc)
+                raise
             if errors:
                 raise ValueError("; ".join(errors))
             self.config.save_device_settings(**session.identity, settings=settings)
@@ -800,11 +1185,16 @@ class Daemon:
                 except (OSError, ConfigError):
                     LOG.exception("could not restore configuration after IPC failure")
             session.options = session.requested = original_options
-            rollback_errors = (
-                apply_settings(session.device, before)
-                if session.validate_identity()
-                else session.errors
-            )
+            try:
+                rollback_errors = (
+                    apply_settings(session.device, before)
+                    if session.validate_identity()
+                    else session.errors
+                )
+            except DEVICE_ERRORS as exc:
+                # The unit gate refused: a different or unidentified mouse.
+                session.identity_failed(exc)
+                rollback_errors = [f"rollback skipped: {exc}"]
             if rollback_errors:
                 LOG.error(
                     "could not restore settings after IPC failure: %s", "; ".join(rollback_errors)
@@ -819,7 +1209,7 @@ class Daemon:
                 continue
             try:
                 packets = channel.read_events()
-            except OSError as exc:
+            except (OSError, hidpp.NoResponse) as exc:
                 LOG.warning("lost %s: %s", channel.path, exc)
                 self.failed_channels.add(id(channel))
                 lost = [s for s in self.sessions if s.device.channel is channel]
@@ -845,7 +1235,6 @@ class Daemon:
                 "maestrod currently requires an Omarchy/Hyprland session; "
                 "other desktops are not supported yet"
             )
-        check_other_owners()
         old_handlers = {}
         atexit.register(self.close)
         try:
@@ -871,9 +1260,12 @@ class Daemon:
             self.actions.automations = self.config.raw.get("automations", {})
             self.windows.connect()
             self.window = self.windows.poll()
-            self.discover_devices()
+            # Another HID++ owner pauses the daemon instead of stopping it, so
+            # the service never restart-loops; no hidraw is opened until it is gone.
+            if not self.check_owner():
+                self.discover_devices()
             next_poll = next_reconcile = 0
-            next_scan = time.monotonic() + 5
+            next_scan = time.monotonic() + (OWNER_RECHECK if self.paused_by else 5)
             while not self.stop:
                 now = time.monotonic()
                 self.process_events()
@@ -892,9 +1284,11 @@ class Daemon:
                     self.windows.connect()
                     next_poll = now + 0.75
                 if now >= next_scan:
-                    check_other_owners()
-                    self.discover_devices()
-                    next_scan = now + 5
+                    if self.check_owner():
+                        next_scan = now + OWNER_RECHECK
+                    else:
+                        self.discover_devices()
+                        next_scan = now + 5
                 if now >= next_reconcile:
                     # Safety net when a receiver did not deliver a wake notification.
                     for session in self.sessions:
@@ -920,21 +1314,7 @@ class Daemon:
         if self.closed:
             return
         self.closed = True
-        if self.actions is not None:
-            self.actions.cancel_all()
-        for session in self.sessions + self.retired_sessions:
-            try:
-                errors = session.close()
-                if errors:
-                    LOG.error("cleanup %s: %s", session.identity["name"], "; ".join(errors))
-            except Exception:
-                LOG.exception("cleanup failed for %s", session.identity["name"])
-        resources = [
-            lambda: hidpp.close_devices(
-                self.devices + [s.device for s in self.sessions + self.retired_sessions]
-            ),
-            self.windows.close,
-        ]
+        resources = [self._release_mice, self.windows.close]
         if self.output is not None:
             resources.append(self.actions.close if self.actions is not None else self.output.close)
         if self.server is not None:

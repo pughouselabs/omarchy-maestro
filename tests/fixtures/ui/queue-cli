@@ -1,0 +1,32 @@
+#!/usr/bin/python3 -I
+"""Finite or stuck fake children for offscreen queue tests. No hardware access."""
+
+import json
+import sys
+import time
+
+command = sys.argv[1]
+if command == "hang-write":
+    time.sleep(40)
+elif command in ("overflow-write", "stderr-write"):
+    stream = sys.stderr if command == "stderr-write" else sys.stdout
+    while True:
+        stream.write("x" * 8192)
+        stream.flush()
+elif command == "status":
+    payload = [a for a in sys.argv[2:] if not a.startswith("--")]
+    if payload:
+        print(payload[0])
+    elif "--with-state" in sys.argv:
+        print('{"devices":[{"supported":true,"name":"MX Anywhere 3"}],"paused_by":null,"problem":null}')
+    else:
+        print('[{"supported":true,"name":"MX Anywhere 3"}]')
+elif command == "bad-status":
+    print("not JSON")
+elif command == "exit2":
+    sys.exit(2)
+elif command == "test-action":
+    json.load(sys.stdin)
+    print('{"ok":true}')
+else:
+    print(json.dumps({"supported": True, "name": command}))

@@ -31,10 +31,12 @@ else
   printf 'venv\n' > "$method_file"
 fi
 
-rules="$root/packaging/udev/70-maestro.rules"
-printf 'Install the udev rule with these commands (requires sudo):\n'
-printf '  sudo install -D -m 0644 %q /etc/udev/rules.d/70-maestro.rules\n' "$rules"
-printf '  sudo install -D -m 0644 %q /etc/modules-load.d/maestro-uinput.conf\n' "$root/packaging/modules-load/maestro-uinput.conf"
+printf 'Required: mouse access for the widget, settings app and command line (requires sudo):\n'
+printf '  sudo install -D -m 0644 %q /etc/udev/rules.d/70-maestro.rules\n' "$root/packaging/udev/70-maestro.rules"
 printf '  sudo udevadm control --reload-rules && sudo udevadm trigger\n'
+printf 'Optional, only for the maestrod service (lets programs running as you create virtual input):\n'
+printf '  sudo install -D -m 0644 %q /etc/udev/rules.d/71-maestro-uinput.rules\n' "$root/packaging/udev/71-maestro-uinput.rules"
+printf '  sudo install -D -m 0644 %q /etc/modules-load.d/maestro-uinput.conf\n' "$root/packaging/modules-load/maestro-uinput.conf"
+printf '  sudo modprobe uinput && sudo udevadm control --reload-rules && sudo udevadm trigger\n'
 bash "$root/packaging/hypr/window-rule.sh" install
 printf 'Installed Maestro. Ensure %s is on PATH.\n' "$bin_dir"

@@ -20,7 +20,7 @@ class PairingWire(hidpp.Channel):
         self.reply = reply
         self.sent = []
 
-    def _drain(self):
+    def _drain(self, deadline=None):
         pass
 
     def _read(self, deadline):

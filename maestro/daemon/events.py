@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-import os
+import logging
 import struct
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from maestro import hidpp
+
+from . import ownership
+from .ownership import RECORD_PROBLEM, RecordError, device_key
+
+LOG = logging.getLogger("maestrod")
 
 WIRELESS_DEVICE_STATUS = 0x1D4B
 BUTTON_CIDS = {
@@ -19,8 +25,135 @@ BUTTON_CIDS = {
 }
 
 
+IDENTITY_PROBLEM = (
+    "Maestro could not confirm this mouse's identity, so it won't change its settings. "
+    "Reconnect it."
+)
+
+
 class IdentityChanged(hidpp.NoResponse):
     """An identity read succeeded and the original endpoint is no longer there."""
+
+
+class Unidentified(hidpp.NoResponse):
+    """The mouse's unit ID could not be read, so nothing may be written to it."""
+
+
+class UnitGate:
+    """The single check every HID++ write to a session's mouse passes through.
+
+    Installed as the device's ``write_guard`` (see ``hidpp.check_write``), so
+    any write path, including a new one, is covered. Immediately before every
+    write, including each retry, it reads the mouse's live unit ID and
+    requires the tag recorded when the mouse was opened. A mouse whose unit
+    ID cannot be read is read-only.
+
+    Inside ``batch()`` a refusal is final: once one check fails or times out,
+    every later write in that batch is refused without being sent.
+    """
+
+    def __init__(self, expected):
+        self.expected = expected
+        self.depth = 0
+        self.refused = None
+
+    def __call__(self, device, feature=None, function=None):
+        self.check(device)
+
+    def check(self, device):
+        """Read the live unit ID and compare it. Writes nothing."""
+        if self.depth and self.refused is not None:
+            raise type(self.refused)(str(self.refused))
+        try:
+            return self._check(device)
+        except (IdentityChanged, Unidentified) as exc:
+            if self.depth:
+                self.refused = exc
+            raise
+
+    def _check(self, device):
+        live = None if self.expected is None else ownership.selector_tag(device_key(device))
+        if live is None:
+            raise Unidentified(
+                "could not read the mouse's unit ID to confirm which mouse this is; "
+                "nothing was changed"
+            )
+        if live != self.expected:
+            raise IdentityChanged("a different mouse now answers at this position")
+        return live
+
+    @contextmanager
+    def batch(self):
+        self.depth += 1
+        try:
+            yield self
+        finally:
+            self.depth -= 1
+            if not self.depth:
+                self.refused = None
+
+
+def guard_device(device):
+    """Read the unit ID now and install a UnitGate on ``device``. Returns the gate.
+
+    The gate's ``expected`` is None when the unit ID cannot be read; every
+    write is then refused.
+    """
+    gate = UnitGate(ownership.selector_tag(device_key(device)))
+    device.write_guard = gate
+    return gate
+
+
+@contextmanager
+def write_batch(device):
+    """Group writes to one mouse: each is still checked, and one refusal stops the rest."""
+    gate = getattr(device, "write_guard", None)
+    if isinstance(gate, UnitGate):
+        with gate.batch():
+            yield
+    else:
+        yield
+
+
+class ControlBusy(RuntimeError):
+    """Another app holds a control, or an earlier Maestro run left it taken."""
+
+    def __init__(self, label, detail, leftover=False):
+        super().__init__(detail)
+        self.label = label
+        self.leftover = leftover
+
+    @property
+    def status(self):
+        if self.leftover:
+            return (
+                f"Maestro may have left the {self.label} taken during an unexpected shutdown. "
+                "Choose Release button to fix it."
+            )
+        return (
+            f"The {self.label} is held by another app (Solaar or logiops?). "
+            "Close it, or turn the mouse off and on. If no other app is running, "
+            "choose Release button in Maestro settings."
+        )
+
+
+class RecordFailed(RuntimeError):
+    """Diversion refused because its ownership record could not be saved."""
+
+    status = RECORD_PROBLEM
+
+
+def control_label(cid):
+    for name in ("gesture", "mode_shift", "middle", "back", "forward"):
+        if cid in BUTTON_CIDS[name]:
+            return {
+                "gesture": "gesture button",
+                "mode_shift": "wheel mode button",
+                "middle": "middle button",
+                "back": "back button",
+                "forward": "forward button",
+            }[name]
+    return f"control {cid:#06x}"
 
 
 def supported_device(device):
@@ -84,17 +217,6 @@ class EventChannel(hidpp.Channel):
             else:
                 self.notifications.append(data)
 
-    def _drain(self):
-        for _ in range(8192):
-            try:
-                data = os.read(self.fd, 64)
-            except BlockingIOError:
-                return
-            if not data:
-                raise OSError("hidraw channel closed")
-            self._capture(data)
-        raise OSError("hidraw stream did not drain")
-
     def _read(self, deadline):
         data = super()._read(deadline)
         if data:
@@ -140,19 +262,62 @@ class Control:
 
 
 class Diversion:
-    def __init__(self, device, guard=None):
+    def __init__(self, device, guard=None, ledger=None):
+        self.name = assert_mouse(device)
+        # Every write is checked against the unit ID read here (UnitGate).
+        # Without a readable unit ID the mouse is read-only and nothing is
+        # recorded. Nothing is ever reclaimed automatically either way.
+        key = device_key(device)
+        self.gate = UnitGate(ownership.selector_tag(key))
         self.device = device
         self.guard = guard
-        self.name = assert_mouse(device)
+        self.ledger = ledger
+        self.key = key if ledger is not None else None
         self.controls = {}
         self.owned = {}  # cid -> raw XY requested; record BEFORE a write can time out
+        self.flags = {}  # cid -> reporting flags Maestro expects while it owns the control
         self.thumb_owned = False
+        self.thumb_flags = None
+        # Recorded diversions an earlier run left behind. They stay in the
+        # record and block use until the user releases them explicitly.
+        self.leftovers = {}  # cid or "thumb" -> recorded (raw_xy, flags) or mode byte
+        self.record_pending = False
         if device.has(hidpp.REPROG_CONTROLS_V4):
             count = device.call(hidpp.REPROG_CONTROLS_V4, 0)[0]
             for i in range(count):
                 data = device.call(hidpp.REPROG_CONTROLS_V4, 1, bytes([i]))
                 cid = int.from_bytes(data[:2], "big")
                 self.controls[cid] = Control(cid, data[4] | data[8] << 8)
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, device):
+        # Whatever Device object reaches this mouse carries the session's gate.
+        self._device = device
+        device.write_guard = self.gate
+
+    @property
+    def unit_key(self):
+        """Pseudonymous tag of this physical mouse (see ownership.selector_tag), or None."""
+        return self.gate.expected
+
+    def verify_unit(self, expected=None, *, required=False):
+        """Read the unit ID from the mouse again and confirm it is the same mouse.
+
+        ``unit_key`` is cached when the mouse is first opened, so a same-model
+        mouse paired into the same receiver slot would still match it. This
+        reads the live unit ID instead. ``required`` (an explicit release
+        chosen by selector) also demands it equals ``expected``. Writes
+        nothing. Raises IdentityChanged for a different mouse and Unidentified
+        when the ID cannot be read.
+        """
+        live = self.gate.check(self.device)
+        if required and live != expected:
+            raise IdentityChanged("a different mouse now answers at this position")
+        return live
 
     def cid(self, name):
         return next((cid for cid in BUTTON_CIDS[name] if cid in self.controls), None)
@@ -164,6 +329,7 @@ class Diversion:
         return data[2]
 
     def _set(self, cid, enabled, raw_xy):
+        """Write only the temporary diversion bits; returns the read-back flags."""
         self.check_endpoint()
         # Each setting has a value bit and a validity bit; remap=0 preserves mapping.
         flags = 0x02 | (0x01 if enabled else 0)
@@ -172,8 +338,10 @@ class Diversion:
         self.device.call(hidpp.REPROG_CONTROLS_V4, 3, struct.pack("!HBH", cid, flags, 0))
         expected = (1 if enabled else 0) | (0x10 if enabled and raw_xy else 0)
         mask = 0x11 if raw_xy else 1
-        if self.reporting(cid) & mask != expected:
+        actual = self.reporting(cid)
+        if actual & mask != expected:
             raise hidpp.HidppError(f"diversion readback failed for control {cid:#06x}")
+        return actual
 
     def enable(self, cid, raw_xy=False):
         self.check_endpoint()
@@ -184,17 +352,149 @@ class Diversion:
             return
         if cid in self.owned:
             self.disable(cid)
-        if self.reporting(cid) & 0x15:
-            raise RuntimeError(
-                f"control {cid:#06x} is already diverted; stop its other owner first"
+        current = self.reporting(cid)
+        if current & 0x15:
+            raise ControlBusy(
+                control_label(cid),
+                f"control {cid:#06x} is already diverted; stop its other owner first",
+                leftover=cid in self.leftovers,
             )
+        self.leftovers.pop(cid, None)
         self.owned[cid] = raw_xy
-        self._set(cid, True, raw_xy)
+        self.flags[cid] = (current & ~0x11) | 0x01 | (0x10 if raw_xy else 0)
+        try:
+            self._record(required=True)
+        except RecordFailed:
+            del self.owned[cid], self.flags[cid]
+            raise
+        self.reassert(cid)
+
+    def reassert(self, cid):
+        """Set an owned diversion again and keep the recorded flags in step."""
+        actual = self._set(cid, True, self.owned[cid])
+        if self.flags.get(cid) != actual:
+            self.flags[cid] = actual
+            self._record()
 
     def disable(self, cid):
         if cid in self.owned:
             self._set(cid, False, self.owned[cid])
             del self.owned[cid]
+            self.flags.pop(cid, None)
+            self._record()
+
+    def _record(self, required=False):
+        """Save owned and left-behind diversions. Required saves raise RecordFailed.
+
+        A failed cleanup save is logged and retried later (``retry_record``);
+        a stale entry never causes a write, it only shapes the next run's message.
+        """
+        if self.ledger is None or self.key is None:
+            return
+        controls = {cid: (raw, self.flags.get(cid, 0x01)) for cid, raw in self.owned.items()}
+        thumb = self.thumb_flags if self.thumb_owned else None
+        for cid, value in self.leftovers.items():
+            if cid == "thumb":
+                thumb = value if thumb is None else thumb
+            else:
+                controls.setdefault(cid, value)
+        try:
+            self.ledger.update(self.key, controls, thumb)
+        except RecordError as exc:
+            self.record_pending = True
+            LOG.warning("%s: %s", self.name, exc)
+            if required:
+                raise RecordFailed(str(exc)) from exc
+        else:
+            self.record_pending = False
+
+    def retry_record(self):
+        if self.record_pending:
+            self._record()
+
+    def check_leftovers(self):
+        """Find diversions an earlier Maestro run left on this same mouse. Writes nothing.
+
+        A normal shutdown already releases every control, so a recorded
+        control that is still diverted can only follow a crash or a sudden
+        power loss. Matching flags cannot prove who holds it now (another app
+        may divert it the same way), so nothing is ever reclaimed
+        automatically. A control whose record matches is reported as left
+        behind by Maestro and stays recorded until the user chooses Release
+        button; anything else is reported as held by another app. Returns the
+        plain names of the controls left behind.
+        """
+        before = set(self.leftovers)
+        self.leftovers.clear()
+        if self.ledger is None or self.key is None:
+            return []
+        entry = self.ledger.get(self.key)
+        if not entry:
+            return []
+        self.check_endpoint()
+        for cid, (raw_xy, flags) in entry["controls"].items():
+            if cid in self.owned or cid not in self.controls:
+                continue
+            if self.reporting(cid) == flags and flags & 0x11:
+                self.leftovers[cid] = (raw_xy, flags)
+        thumb = entry["thumb"]
+        if thumb is not None and not self.thumb_owned and self.device.has(hidpp.THUMB_WHEEL):
+            mode = self.device.call(hidpp.THUMB_WHEEL, 1)[0]
+            if mode == thumb and mode & 1:
+                self.leftovers["thumb"] = thumb
+        # Keep only what this run owns or what Maestro evidently left behind.
+        self._record()
+        found = [control_label(c) if c != "thumb" else "thumb wheel" for c in self.leftovers]
+        if found and set(self.leftovers) != before:
+            LOG.warning(
+                "%s: %s still taken after an unexpected shutdown; waiting for Release button",
+                self.name,
+                ", ".join(found),
+            )
+        return found
+
+    def _release_thumb(self, data):
+        self.device.call(hidpp.THUMB_WHEEL, 2, bytes([data[0] & ~1, data[1]]))
+        actual = self.device.call(hidpp.THUMB_WHEEL, 1)
+        if actual[0] & 1 or actual[1] != data[1]:
+            raise hidpp.HidppError("thumb-wheel release readback failed")
+
+    def release_leftovers(self, expected=None, *, required=False):
+        """Explicit recovery: undivert controls Maestro may have left behind.
+
+        Covers every control Maestro can divert that this run does not own,
+        plus the thumb wheel, whoever diverted it. Only temporary diversion
+        bits are cleared. The mouse's live unit ID is checked first (see
+        ``verify_unit``), so a replaced or unreadable mouse gets no write.
+        Returns the plain names of what was released.
+        """
+        with self.gate.batch():
+            return self._release_leftovers(expected, required)
+
+    def _release_leftovers(self, expected, required):
+        self.check_endpoint()
+        self.verify_unit(expected, required=required)
+        released = []
+        for cids in BUTTON_CIDS.values():
+            for cid in cids:
+                if cid not in self.controls or cid in self.owned:
+                    continue
+                current = self.reporting(cid)
+                if current & 0x11:
+                    self._set(cid, False, bool(current & 0x10))
+                    released.append(control_label(cid))
+                self.leftovers.pop(cid, None)
+        if not self.thumb_owned and self.device.has(hidpp.THUMB_WHEEL):
+            data = self.device.call(hidpp.THUMB_WHEEL, 1)
+            if data[0] & 1:
+                self._release_thumb(data)
+                released.append("thumb wheel")
+            self.leftovers.pop("thumb", None)
+        self.leftovers.clear()
+        self._record()
+        if released:
+            LOG.info("%s: released %s on request", self.name, ", ".join(released))
+        return released
 
     def thumb(self, enabled):
         if not enabled and not self.thumb_owned:
@@ -206,15 +506,33 @@ class Diversion:
             return
         data = self.device.call(hidpp.THUMB_WHEEL, 1)
         if enabled and not self.thumb_owned and data[0] & 1:
-            raise RuntimeError("thumb wheel is already diverted; stop its other owner first")
+            raise ControlBusy(
+                "thumb wheel",
+                "thumb wheel is already diverted; stop its other owner first",
+                leftover="thumb" in self.leftovers,
+            )
         # Keep direction and every unowned bit unchanged.
         mode = (data[0] | 1) if enabled else (data[0] & ~1)
-        self.thumb_owned = True  # a lost acknowledgement still needs cleanup
+        if not self.thumb_owned:
+            self.leftovers.pop("thumb", None)
+            self.thumb_owned = True  # a lost acknowledgement still needs cleanup
+            self.thumb_flags = mode
+            try:
+                self._record(required=True)
+            except RecordFailed:
+                self.thumb_owned, self.thumb_flags = False, None
+                raise
         self.device.call(hidpp.THUMB_WHEEL, 2, bytes([mode, data[1]]))
         actual = self.device.call(hidpp.THUMB_WHEEL, 1)
         if bool(actual[0] & 1) != enabled or actual[1] != data[1]:
             raise hidpp.HidppError("thumb-wheel diversion readback failed")
-        self.thumb_owned = enabled
+        if enabled and self.thumb_flags != actual[0]:
+            self.thumb_flags = actual[0]
+            self._record()
+        if self.thumb_owned != enabled:
+            self.thumb_owned = enabled
+            self.thumb_flags = None
+            self._record()
 
     def check_endpoint(self, *, write=True):
         if not supported_device(self.device):
@@ -227,14 +545,25 @@ class Diversion:
             )
 
     def close(self):
+        """Undo this run's diversions. Each write still passes the unit gate."""
+        with self.gate.batch():
+            return self._close()
+
+    def _close(self):
+        # A refused identity check stops cleanup at once (no further writes);
+        # the caller keeps this mouse's record.
         errors = []
         for cid in list(self.owned):
             try:
                 self.disable(cid)
+            except (IdentityChanged, Unidentified):
+                raise
             except Exception as exc:
                 errors.append(f"control {cid:#06x}: {exc}")
         try:
             self.thumb(False)
+        except (IdentityChanged, Unidentified):
+            raise
         except Exception as exc:
             errors.append(f"thumb wheel: {exc}")
         return errors

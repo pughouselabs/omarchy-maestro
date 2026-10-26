@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import isolation  # noqa: F401  (private runtime and config dirs)
@@ -42,6 +43,10 @@ class CliCoreTests(unittest.TestCase):
             patch.object(mouse, "find_mice", return_value=[self.known, self.unknown])
         )
         stack.enter_context(patch.object(mouse, "last_scan", hidpp.ScanResult()))
+        # These fakes have no unit ID; treat it as read (see test_daemon_cli for the gate).
+        stack.enter_context(
+            patch.object(cli, "guard_device", return_value=SimpleNamespace(expected="unit"))
+        )
         stack.enter_context(patch.object(hidpp, "close_devices"))
         self.stdout = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
         self.stderr = stack.enter_context(contextlib.redirect_stderr(io.StringIO()))

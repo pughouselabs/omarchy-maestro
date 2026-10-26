@@ -69,7 +69,7 @@ call fixtureRepair device 1
 idle
 jq -e '(.devices[1].model | test("Anywhere")) and (.design.credit | test("danish_blends")) and (.design.credit | test("No device image") | not)' >/dev/null <<< "$result" || { jq '{devices:[.devices[].model],credit:.design.credit}' <<< "$result" >&2; exit 1; }
 unset MAESTRO_PREVIEW_TWO_MICE MAESTRO_CONTROLS_FIXTURE
-printf '%s\n' 'PASS: a family without its own images credits the silhouette source in Help'
+printf '%s\n' 'PASS: a model without its own picture credits the silhouette source in Help'
 
 # First run must work without a connected device, and skipping is distinct from completion.
 stop

@@ -6,12 +6,106 @@ Run with: python3 -m unittest discover -s tests
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 import isolation  # noqa: F401  (private runtime and config dirs)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from maestro import hidpp, mouse  # noqa: E402
+from maestro.daemon.events import EventChannel  # noqa: E402
+
+
+class DrainBudgetTests(unittest.TestCase):
+    def channel(self, cls=hidpp.Channel):
+        channel = cls.__new__(cls)
+        channel.fd, channel.path, channel._swid = 123, "fake", 0
+        if cls is EventChannel:
+            from collections import deque
+
+            channel.notifications, channel.overflow = deque(), False
+        return channel
+
+    def test_never_eagain_stream_has_packet_cap_on_both_channels(self):
+        for cls in (hidpp.Channel, EventChannel):
+            with (
+                self.subTest(cls=cls),
+                patch.object(hidpp.os, "read", return_value=b"noise") as read,
+                patch.object(hidpp.time, "monotonic", return_value=0),
+            ):
+                with self.assertRaises(hidpp.Timeout):
+                    self.channel(cls)._drain()
+                self.assertEqual(read.call_count, hidpp.DRAIN_PACKETS)
+
+    def test_drain_has_elapsed_time_cap(self):
+        for cls in (hidpp.Channel, EventChannel):
+            with (
+                self.subTest(cls=cls),
+                patch.object(hidpp.os, "read", return_value=b"noise") as read,
+                patch.object(hidpp.time, "monotonic", side_effect=[0, 0, 0.051]),
+            ):
+                with self.assertRaises(hidpp.Timeout):
+                    self.channel(cls)._drain()
+                self.assertEqual(read.call_count, 1)
+
+    def test_empty_stream_stops_immediately_before_any_write(self):
+        for cls in (hidpp.Channel, EventChannel):
+            for pairing in (False, True):
+                channel = self.channel(cls)
+                with (
+                    self.subTest(cls=cls, pairing=pairing),
+                    patch.object(hidpp.os, "read", return_value=b"") as read,
+                    patch.object(hidpp.os, "write") as write,
+                ):
+                    with self.assertRaisesRegex(hidpp.NoResponse, "closed"):
+                        if pairing:
+                            channel.pairing_info(1, "unifying")
+                        else:
+                            channel.request(1, 0, 1)
+                    read.assert_called_once()
+                    write.assert_not_called()
+
+    def test_request_and_pairing_drain_use_original_deadline(self):
+        for pairing in (False, True):
+            channel = self.channel()
+            with (
+                self.subTest(pairing=pairing),
+                patch.object(hidpp.time, "monotonic", side_effect=[10, 10, 10, 10.02]),
+                patch.object(hidpp.os, "read", side_effect=BlockingIOError),
+                patch.object(hidpp.os, "write") as write,
+            ):
+                with self.assertRaisesRegex(hidpp.Timeout, "expired while draining"):
+                    if pairing:
+                        channel.pairing_info(1, "unifying", timeout=0.01)
+                    else:
+                        channel.request(1, 0, 1, timeout=0.01)
+                write.assert_not_called()
+
+    def test_daemon_discovery_base_channels_cannot_spin_on_eof(self):
+        node = hidpp.HidrawNode("fake", 3, hidpp.LOGITECH_VENDOR, 0xC52B, "receiver")
+        with (
+            patch.object(hidpp.os, "open", return_value=123),
+            patch.object(hidpp.os, "close") as close,
+            patch.object(hidpp.os, "read", return_value=b"") as read,
+            patch.object(hidpp.os, "write") as write,
+        ):
+            result = hidpp.scan_devices([node])
+            self.assertEqual(result.devices, [])
+            self.assertEqual(len(result.errors), 6)
+            self.assertEqual(read.call_count, 6)
+            write.assert_not_called()
+            close.assert_called_once_with(123)
+
+    def test_empty_reply_is_a_closed_channel(self):
+        channel = self.channel()
+        with (
+            patch.object(hidpp.time, "monotonic", return_value=0),
+            patch.object(hidpp.select, "select", return_value=([123], [], [])),
+            patch.object(hidpp.os, "read", return_value=b"") as read,
+        ):
+            with self.assertRaisesRegex(hidpp.NoResponse, "closed"):
+                channel._read(1)
+            read.assert_called_once()
 
 
 class FakeChannel(hidpp.Channel):
@@ -119,6 +213,46 @@ class FramingTests(unittest.TestCase):
             dev.ping(timeout=0.05)
         self.assertEqual(dev.ping(timeout=0.5), (4, 5))
         ch.close()
+
+
+class WriteGuardTests(unittest.TestCase):
+    """Device.call runs write_guard before anything that is not a known read."""
+
+    def device(self, guard):
+        sent = []
+        channel = type(
+            "Channel", (), {"request": lambda self, *args, **kwargs: sent.append(args) or b"\1"}
+        )()
+        node = hidpp.HidrawNode("/dev/fake", 3, 0x46D, 0xC52B, "receiver")
+        device = hidpp.Device(channel, 1, node, write_guard=guard)
+        device._features.update({hidpp.ADJUSTABLE_DPI: 5, hidpp.CHANGE_HOST: 6, 0x9999: 7})
+        return device, sent
+
+    def test_reads_pass_and_every_other_call_is_checked_first(self):
+        checked = []
+
+        def refuse(device, feature, function):
+            checked.append((feature, function))
+            raise hidpp.NoResponse("refused")
+
+        device, sent = self.device(refuse)
+        device.call(hidpp.ADJUSTABLE_DPI, 2)
+        device.call(hidpp.CHANGE_HOST, 0)
+        self.assertEqual(len(sent), 2)
+        for feature, function in ((hidpp.ADJUSTABLE_DPI, 3), (hidpp.CHANGE_HOST, 1), (0x9999, 0)):
+            with self.assertRaises(hidpp.NoResponse):
+                device.call(feature, function, b"\0")
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(checked, [(hidpp.ADJUSTABLE_DPI, 3), (hidpp.CHANGE_HOST, 1), (0x9999, 0)])
+
+    def test_without_a_guard_writes_are_refused_and_reads_are_sent(self):
+        device, sent = self.device(None)
+        for feature, function in ((hidpp.ADJUSTABLE_DPI, 3), (hidpp.CHANGE_HOST, 1), (0x9999, 0)):
+            with self.assertRaises(hidpp.Unguarded):
+                device.call(feature, function, b"\0")
+        self.assertEqual(sent, [])
+        device.call(hidpp.ADJUSTABLE_DPI, 2)
+        self.assertEqual(len(sent), 1)
 
 
 class DpiListTests(unittest.TestCase):

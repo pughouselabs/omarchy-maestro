@@ -20,5 +20,6 @@ export XDG_RUNTIME_DIR MAESTRO_CONFIG_HOME="$XDG_CONFIG_HOME/maestro"
 umask 077
 mkdir -m 700 -p -- "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME/maestro" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
 export QT_QPA_PLATFORM=offscreen
+export QT_QPA_PLATFORMTHEME=
 unset HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY DISPLAY
 unset maestro_ui_kind maestro_ui_name maestro_ui_current

@@ -32,3 +32,5 @@ BackupPanel 1.0 BackupPanel.qml
 HelpPanel 1.0 HelpPanel.qml
 ProfileManager 1.0 ProfileManager.qml
 LinkButton 1.0 LinkButton.qml
+BarQueue 1.0 BarQueue.qml
+BoundedProcess 1.0 BoundedProcess.qml

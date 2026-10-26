@@ -33,13 +33,13 @@ class InputOwner:
             "result": None,
             "lock": threading.Lock(),
             "started": False,
-            "cancelled": False,
+            "canceled": False,
         }
         self._queue.put(task)
         if not task["done"].wait(self.request_timeout):
             with task["lock"]:
                 if not task["started"]:
-                    task["cancelled"] = True
+                    task["canceled"] = True
                     raise TimeoutError("virtual input owner did not respond")
             # Once an emitter has started, wait for its result. A timed-out
             # press must never be allowed to finish after its caller returns.
@@ -96,7 +96,7 @@ class InputOwner:
             else:
                 task = self._queue.get()
             with task["lock"]:
-                if task["cancelled"]:
+                if task["canceled"]:
                     task["done"].set()
                     continue
                 task["started"] = True

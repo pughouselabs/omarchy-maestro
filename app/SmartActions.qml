@@ -257,7 +257,7 @@ Item {
     Rectangle { width:parent.width; height:1; color:Theme.border }
     Button { text:"Delete"; foreground:Theme.urgent; anchors.verticalCenter:parent.verticalCenter; onClicked:root.deleteId=root.selectedId }
     Row { anchors.right:parent.right; anchors.verticalCenter:parent.verticalCenter; spacing:8
-      Button { text:root.trySucceeded ? "Done" : "Try it"; glyph:root.trySucceeded ? "check" : "play"; kind:"secondary"; onClicked:root.tryRoutine() }
+      Button { objectName:"try-action"; text:root.trySucceeded ? "Started" : "Try it"; glyph:root.trySucceeded ? "check" : "play"; kind:"secondary"; onClicked:root.tryRoutine() }
       Button { text:"Assign to a button"; kind:"primary"; enabled:root.controller.device !== null; onClicked:root.commitPending(function(ok) { if (ok) root.assign(root.selectedId) }) }
     }
   }

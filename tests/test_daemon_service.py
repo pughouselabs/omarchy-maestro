@@ -1,5 +1,6 @@
 import signal
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,6 +39,28 @@ class SessionTests(unittest.TestCase):
         self.session.close()
         self.assertEqual(self.device.reporting[0xC3], 0)
         self.assertFalse(self.device.thumb_mode[0] & 1)
+
+    def test_event_drain_timeout_suspends_session_and_releases_keys(self):
+        self.session.configure(
+            resolve(
+                {"buttons": {"middle": {"type": "mouse", "button": "middle"}}},
+                self.session.identity,
+            )
+        )
+        self.session.event(("buttons", {0x52}))
+        self.assertTrue(self.output.held)
+        with tempfile.TemporaryDirectory() as directory:
+            daemon = Daemon(ConfigFile(Path(directory) / "config.json"))
+            self.addCleanup(daemon.close)
+            daemon.sessions.append(self.session)
+            self.device.channel.read_events = lambda: (_ for _ in ()).throw(
+                hidpp.Timeout("stream did not drain")
+            )
+            with self.assertLogs("maestrod", level="WARNING"):
+                daemon.process_events()
+            self.assertFalse(self.session.online)
+            self.assertFalse(self.output.held)
+            self.assertIn(id(self.device.channel), daemon.failed_channels)
 
     def test_remapped_middle_can_be_held_across_profile_change(self):
         raw = {
@@ -153,6 +176,35 @@ class SessionTests(unittest.TestCase):
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_try_action_acknowledges_start_before_delayed_command_failure(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def missing_program(*args, **kwargs):
+            entered.set()
+            release.wait(2)
+            raise FileNotFoundError("fake missing program")
+
+        with tempfile.TemporaryDirectory() as directory:
+            daemon = Daemon(ConfigFile(Path(directory) / "config.json"))
+            daemon.actions = Actions(FakeOutput(), popen=missing_program)
+            self.addCleanup(daemon.close)
+            action = {
+                "type": "sequence",
+                "steps": [
+                    {"type": "delay", "ms": 20},
+                    {"type": "command", "argv": ["fake-missing-program"]},
+                ],
+            }
+            with self.assertLogs("maestrod", level="ERROR"):
+                response = daemon.handle({"op": "test_action", "action": action})
+                self.assertEqual(response, {"ok": True})
+                self.assertTrue(entered.wait(2))
+                thread = next(iter(daemon.actions._runs.values()))[1]
+                self.assertTrue(thread.is_alive())
+                release.set()
+                thread.join(2)
+                self.assertFalse(thread.is_alive())
+
     def test_sighup_reload_and_both_stop_signals_cleanup(self):
         for stop_signal in (signal.SIGINT, signal.SIGTERM):
             with self.subTest(signal=stop_signal), tempfile.TemporaryDirectory() as directory:
@@ -192,7 +244,7 @@ class LifecycleTests(unittest.TestCase):
                 )
                 with (
                     patch("maestro.daemon.service.adopt_channels"),
-                    patch("maestro.daemon.service.check_other_owners"),
+                    patch("maestro.daemon.service.check_other_owners", return_value=None),
                     patch("maestro.daemon.service.signal.signal", side_effect=install),
                     patch("maestro.daemon.service.select.select", return_value=([], [], [])),
                     patch.object(config, "reload", wraps=config.reload) as reload,
@@ -230,7 +282,7 @@ class LifecycleTests(unittest.TestCase):
 
             with (
                 patch("maestro.daemon.service.adopt_channels"),
-                patch("maestro.daemon.service.check_other_owners"),
+                patch("maestro.daemon.service.check_other_owners", return_value=None),
                 patch("maestro.daemon.service.hidpp.find_hidpp_nodes", return_value=[]),
                 patch.object(daemon, "process_events", side_effect=crash),
             ):
@@ -250,7 +302,7 @@ class LifecycleTests(unittest.TestCase):
                 server_factory=lambda handler: SimpleNamespace(close=lambda: None),
             )
             with (
-                patch("maestro.daemon.service.check_other_owners"),
+                patch("maestro.daemon.service.check_other_owners", return_value=None),
                 patch.object(daemon, "discover_devices") as discover,
             ):
                 with self.assertRaises(PermissionError):
@@ -264,10 +316,9 @@ class LifecycleTests(unittest.TestCase):
             pid.mkdir()
             (pid / "comm").write_text("bash\n")
             (pid / "cmdline").write_bytes(b"bash\0-c\0echo solaar\0")
-            check_other_owners(proc)
+            self.assertIsNone(check_other_owners(proc))
             (pid / "comm").write_text("solaar\n")
-            with self.assertRaisesRegex(RuntimeError, "PID 123"):
-                check_other_owners(proc)
+            self.assertEqual(check_other_owners(proc), "Solaar")
 
     def test_ipc_set_is_saved_and_failed_save_rolls_back_hardware(self):
         with tempfile.TemporaryDirectory() as directory:

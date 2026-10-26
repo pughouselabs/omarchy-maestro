@@ -43,23 +43,9 @@ Item {
   property bool creditsOpen:false
   property bool overflowOpen:false
   property string tourToast:""
-  property string deviceImageCredit:""
-  property string deviceImageChanges:""
-  readonly property string deviceFamily: {
-    const name=String(appController.device ? appController.device.model : "MX Master 2S").toLowerCase()
-    return name.indexOf("mx master") >= 0 ? "mx-master" : name.indexOf("anywhere") >= 0 ? "mx-anywhere" : name.indexOf("vertical") >= 0 ? "mx-vertical" : name.indexOf("ergo") >= 0 ? "mx-ergo" : "unknown"
-  }
-  FileView {
-    path:Quickshell.shellDir+"/assets/devices/"+root.deviceFamily+"/hotspots.json"; preload:true; watchChanges:true; printErrors:false
-    onFileChanged:reload()
-    onLoaded: { try { const data=JSON.parse(text()); root.deviceImageCredit=data.credit || "No image credit supplied."; root.deviceImageChanges=data.credit_changes || "" } catch(error) { root.useSilhouetteCredit() } }
-    onLoadFailed:root.useSilhouetteCredit()
-  }
-  // Families without their own images show silhouette.png, which is traced from the MX Master 2S render.
-  function useSilhouetteCredit() {
-    deviceImageCredit="MX Master 2S 3D model by danish_blends (sketchfab.com/3d-models/logitech-mx-master-2s-danish-blends-e8f3235951934a01aba4e0ee3de72e71), licensed CC BY-NC 4.0; rendered for Maestro."
-    deviceImageChanges="Shown as a neutral silhouette traced from that render and tinted with the current theme."
-  }
+  // Credits follow the picture the device view shows for this model (DeviceAssets.js).
+  readonly property string deviceImageCredit:deviceView.credit.text
+  readonly property string deviceImageChanges:deviceView.credit.changes
   AppState { id: appController }
   FileView {
     id:serviceLauncher
@@ -199,6 +185,7 @@ Item {
             }
           }
           Label { width:parent.width; visible:appController.message !== ""; text:appController.message; color:Theme.urgent }
+          Button { visible:appController.message !== "" && appController.device !== null && appController.device.release_available === true; text:"Release button"; bordered:true; enabled:!appController.applying; tooltipText:"Free a button that another app or an earlier Maestro run left diverted"; onClicked:appController.releaseButtons() }
           Repeater { model:appController.fieldErrors; Label { required property var modelData; width:notice.width; text:modelData.path+": "+modelData.message; color:Theme.urgent; font.pixelSize:12 } }
           Label { visible:appController.applying; text:"Saving…"; color:Theme.muted }
         }
@@ -271,7 +258,7 @@ Item {
             property real availableWidth:width
             SmartActions { id:smartActions; anchors.fill:parent; controller:appController; onEditingRequested:function(position) {} ; onAssign:function(id) { root.pendingAutomation=id; root.page="device"; root.deviceTab="buttons"; root.drawer="" } }
           }
-          HelpPanel { id:helpPanel; anchors.fill:parent; visible:root.page === "help"; controller:appController; credit:root.deviceImageCredit; changes:root.deviceImageChanges; guide:root.serviceGuideUrl; onTour:welcome.open() }
+          HelpPanel { id:helpPanel; anchors.fill:parent; visible:root.page === "help"; controller:appController; credit:root.deviceImageCredit; changes:root.deviceImageChanges; creditUrl:deviceView.credit.url; license:deviceView.credit.license; licenseUrl:deviceView.credit.licenseUrl; imageModel:appController.device ? String(appController.device.model || "") : ""; silhouette:deviceView.folder === ""; guide:root.serviceGuideUrl; onTour:welcome.open() }
           BackupPanel { anchors.fill:parent; visible:root.page === "backups"; controller:appController; onRestoreRequested:function(name) { root.restoreName=name } }
         }
       }

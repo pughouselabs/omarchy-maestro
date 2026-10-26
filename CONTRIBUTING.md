@@ -10,9 +10,9 @@ Clone the repository anywhere and link it into the Omarchy plugins folder to
 try the widget:
 
 ```sh
-ln -s "$PWD" ~/.config/omarchy/plugins/io.github.nodrej.maestro
+ln -s "$PWD" ~/.config/omarchy/plugins/io.github.pughouselabs.maestro
 omarchy-shell shell rescanPlugins
-omarchy plugin enable io.github.nodrej.maestro
+omarchy plugin enable io.github.pughouselabs.maestro
 ```
 
 `scripts/setup.sh` checks Python, runs the unit tests and lists Logitech hidraw

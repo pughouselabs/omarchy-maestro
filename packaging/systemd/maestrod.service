@@ -1,14 +1,19 @@
 [Unit]
 Description=Maestro mouse settings, buttons and gestures
-Documentation=https://github.com/nodrej/omarchy-maestro/blob/main/docs/configuration.md
+Documentation=https://github.com/pughouselabs/omarchy-maestro/blob/main/docs/configuration.md
 After=graphical-session.target
 PartOf=graphical-session.target
+# At most five starts in five minutes (the first start counts), then systemd
+# stops restarting it after a crash. See why with: journalctl --user -u maestrod
+# Solaar or logiops running is not a crash: maestrod waits for it to close.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/maestrod
 Restart=on-failure
-RestartSec=3
+RestartSec=5
 TimeoutStopSec=15
 UMask=0077
 NoNewPrivileges=yes

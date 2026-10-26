@@ -8,7 +8,16 @@ import isolation  # noqa: F401  (private runtime and config dirs)
 from daemon_fakes import FakeDevice, packet
 
 from maestro import hidpp
-from maestro.daemon.events import Diversion, EventChannel, decode, is_notification, same_endpoint
+from maestro.daemon.events import (
+    Diversion,
+    EventChannel,
+    IdentityChanged,
+    Unidentified,
+    decode,
+    guard_device,
+    is_notification,
+    same_endpoint,
+)
 from maestro.daemon.gestures import Gesture, WheelAccumulator
 
 
@@ -85,8 +94,91 @@ class DiversionTests(unittest.TestCase):
         diversion.enable(0xC3, True)
         identified[0] = False
         device.calls.clear()
-        self.assertTrue(diversion.close())
+        with self.assertRaises(IdentityChanged):
+            diversion.close()
         self.assertFalse(device.calls)
+
+
+class UnitGateTests(unittest.TestCase):
+    def unit_reads(self, device):
+        return [c for c in device.calls if c[0] == hidpp.FW_VERSION]
+
+    def test_every_write_in_a_batch_reads_the_unit_id_first(self):
+        device = FakeDevice()
+        diversion = Diversion(device)
+        device.calls.clear()
+        with diversion.gate.batch():
+            device.call(hidpp.ADJUSTABLE_DPI, 3, b"\0\x04\xb0")
+            device.call(hidpp.ADJUSTABLE_DPI, 3, b"\0\x03\xe8")
+        self.assertEqual(len(self.unit_reads(device)), 2)
+
+    def test_one_refusal_stops_the_rest_of_the_batch(self):
+        device = FakeDevice()
+        diversion = Diversion(device)
+        device.unit = b"\0\0\0\0"
+        device.calls.clear()
+        with diversion.gate.batch():
+            for _ in range(2):
+                with self.assertRaises(Unidentified):
+                    device.call(hidpp.ADJUSTABLE_DPI, 3, b"\0\x04\xb0")
+            # Even once the ID reads again, the stopped batch stays stopped.
+            device.unit = FakeDevice().unit
+            with self.assertRaises(Unidentified):
+                device.call(hidpp.ADJUSTABLE_DPI, 3, b"\0\x04\xb0")
+        self.assertEqual(len(self.unit_reads(device)), 1)
+        self.assertFalse([c for c in device.calls if hidpp.is_write(*c[:2])])
+        # A new batch (or a single write) checks afresh.
+        device.call(hidpp.ADJUSTABLE_DPI, 3, b"\0\x04\xb0")
+        self.assertEqual(device.dpi, 1200)
+
+
+class SwapChannel:
+    """In-memory channel for a real hidpp.Device: mouse A answers until the
+    ROOT feature lookup, then mouse B takes the slot."""
+
+    FEATURES = {hidpp.FW_VERSION: 2, hidpp.ADJUSTABLE_DPI: 5}
+
+    def __init__(self, b_unit):
+        self.unit = b"\x11\x22\x33\x44"
+        self.b_unit = b_unit
+        self.log = []
+
+    def request(self, index, idx, function, params=b"", timeout=1.0):
+        if idx == 0 and function == 0:
+            feature = int.from_bytes(params[:2], "big")
+            if feature == hidpp.ADJUSTABLE_DPI:
+                self.unit = self.b_unit  # the swap happens during this lookup
+            return bytes([self.FEATURES.get(feature, 0)]) + bytes(15)
+        if idx == self.FEATURES[hidpp.FW_VERSION]:
+            self.log.append(("id", self.unit))
+            return b"\x01" + self.unit + bytes(11)
+        self.log.append(("write" if (idx, function) == (5, 3) else "other", self.unit))
+        return bytes(16)
+
+
+class FeatureLookupSwapTests(unittest.TestCase):
+    def test_identity_is_checked_after_the_feature_lookup(self):
+        for b_unit in (b"\x55\x66\x77\x88", b"\0\0\0\0"):
+            with self.subTest(b_unit=b_unit):
+                channel = SwapChannel(b_unit)
+                device = hidpp.Device(channel, 1, SimpleNode(), model="MX Master 2S")
+                device.has(hidpp.FW_VERSION)
+                gate = guard_device(device)
+                self.assertIsNotNone(gate.expected)
+                with self.assertRaises((IdentityChanged, Unidentified)):
+                    device.call(hidpp.ADJUSTABLE_DPI, 3, b"\0\x04\xb0")
+                self.assertNotIn("write", [kind for kind, _ in channel.log])
+
+    def test_a_normal_mouse_still_gets_the_write(self):
+        channel = SwapChannel(b"\x11\x22\x33\x44")
+        device = hidpp.Device(channel, 1, SimpleNode(), model="MX Master 2S")
+        guard_device(device)
+        device.call(hidpp.ADJUSTABLE_DPI, 3, b"\0\x04\xb0")
+        self.assertEqual(channel.log[-2:], [("id", channel.unit), ("write", channel.unit)])
+
+
+class SimpleNode:
+    connection = "unifying"
 
 
 class GestureTests(unittest.TestCase):

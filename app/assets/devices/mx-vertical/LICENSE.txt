@@ -1,0 +1,8 @@
+hero.png is a render of "LOGITECH MX VERTICAL MOUSE" by arc98tect,
+https://sketchfab.com/3d-models/logitech-mx-vertical-mouse-ab3c05e72e7c46d39411478431b1d771
+licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+Changes: rendered with new lighting and camera; printed logo and status light removed; contact shadow added.
+Not affiliated with or endorsed by Logitech. This image is NOT covered by Maestro's MIT license.
+
+The same license and credit apply to hero-rim.png, thumb.png, top-down.png (and their @1x copies) in this folder,
+all rendered from the same model.

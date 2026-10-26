@@ -3,28 +3,46 @@ import QtQuick
 import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
+import "DeviceAssets.js" as DeviceAssets
 Item {
   id:root
   property var controller:null
   property bool hotspots:true
   property string view:"hero"
   property string modelName:controller && controller.device ? controller.device.model : "MX Master 2S"
-  readonly property string family:modelName.toLowerCase().indexOf("mx master") >= 0 ? "mx-master" : modelName.toLowerCase().indexOf("anywhere") >= 0 ? "mx-anywhere" : modelName.toLowerCase().indexOf("vertical") >= 0 ? "mx-vertical" : modelName.toLowerCase().indexOf("ergo") >= 0 ? "mx-ergo" : "unknown"
-  property var metadata:({})
-  property bool heroReady:false
-  property bool rimReady:false
-  property bool thumbReady:false
-  property bool planReady:false
+  // The model's own picture folder, then one with the same body, else the silhouette (DeviceAssets.js).
+  readonly property var folders:DeviceAssets.candidates(modelName)
+  property var folderImages:({})
+  readonly property var chosenFolder:DeviceAssets.choose(folders,folderImages)
+  readonly property string folder:chosenFolder || ""
+  readonly property string assetRoot:folder ? Quickshell.shellDir+"/assets/devices/"+folder+"/" : ""
+  // Each file records the path it loaded, so a stale load from another folder never counts.
+  property var loadedMetadata:({path:"",data:({})})
+  readonly property var metadata:!assetRoot ? ({placeholder:true}) : loadedMetadata.path === assetRoot+"hotspots.json" ? loadedMetadata.data : ({})
+  property string heroLoaded:""
+  property string rimLoaded:""
+  property string thumbLoaded:""
+  property string planLoaded:""
+  readonly property bool heroReady:assetRoot !== "" && heroLoaded === assetRoot+"hero.png"
+  readonly property bool rimReady:assetRoot !== "" && rimLoaded === assetRoot+"hero-rim.png"
+  readonly property bool thumbReady:assetRoot !== "" && thumbLoaded === assetRoot+"thumb.png"
+  readonly property bool planReady:assetRoot !== "" && planLoaded === assetRoot+"top-down.png"
+  readonly property var credit:DeviceAssets.credit(folder,metadata)
   property bool silhouetteReady:false
   property string selectedControl:""
-  readonly property string assetRoot:Quickshell.shellDir+"/assets/devices/"+family+"/"
+  signal recheck(bool all)
+  function setFolderImages(name,state) {
+    if (folderImages[name] === state) return
+    const next=Object.assign({},folderImages); next[name]=state; folderImages=next
+  }
   readonly property bool showCallouts:hotspots && width >= 660
   readonly property bool showInset:showCallouts && Style.windowWidth >= 1100 && thumbReady && normalize(metadata.inset_hotspots || []).length >= 3
   readonly property real calloutWidth:184
   readonly property real hitSize:22
   readonly property bool hasImage:photo.status === Image.Ready
   readonly property var fallback:[{name:"middle",label:"Middle click",x:0.276,y:0.244,side:"left"},{name:"thumb_wheel",label:"Thumb wheel",x:0.627,y:0.565,side:"left"},{name:"gesture",label:"Gesture button",x:0.449,y:0.667,side:"left"},{name:"mode_shift",label:"Wheel mode",x:0.479,y:0.205,side:"right"},{name:"forward",label:"Forward",x:0.691,y:0.568,side:"right"},{name:"back",label:"Back",x:0.79,y:0.561,side:"right"}]
-  readonly property var points:normalize(metadata.hotspots || fallback)
+  // Only controls this mouse reports get a hotspot (an MX Vertical has no thumb wheel).
+  readonly property var points:DeviceAssets.reported(normalize(metadata.hotspots || fallback),controller ? controller.device : null,controller && controller.builtInThumbWheel ? ["thumb_wheel"] : [])
   readonly property var placedPoints:placePoints()
   readonly property var probeGeometry:({hitSize:hitSize,callouts:showCallouts,inset:showInset,groupRing:showInset ? {diameter:36,x:sideCluster.x,y:sideCluster.y,line:magnifierLine} : null,frame:{x:frame.x,y:frame.y,width:frame.width,height:frame.height},points:placedPoints.map(function(point) { return {name:point.name,number:point.number,x:point.dotX,y:point.dotY,side:point.side,inset:point.inset,leader:root.leaderRoute(point),labelX:root.labelX(point),labelY:root.labelY(point),labelWidth:calloutWidth,labelHeight:56} })})
   readonly property real paintedWidth:hasImage ? photo.paintedWidth : frame.width*0.72
@@ -118,13 +136,35 @@ Item {
     return placed
   }
   function choose(name) { selectedControl=name; chosen(name) }
-  FileView { path:root.assetRoot+"hotspots.json"; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:{ try { root.metadata=JSON.parse(text()) } catch(error) { root.metadata=({placeholder:true}) } } onLoadFailed:root.metadata=({placeholder:true}) }
-  FileView { id:heroFile; path:root.assetRoot+"hero.png"; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.heroReady=true; onLoadFailed:root.heroReady=false }
-  FileView { id:rimFile; path:root.assetRoot+"hero-rim.png"; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.rimReady=true; onLoadFailed:root.rimReady=false }
-  FileView { id:thumbFile; path:root.assetRoot+"thumb.png"; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.thumbReady=true; onLoadFailed:root.thumbReady=false }
-  FileView { id:planFile; path:root.assetRoot+"top-down.png"; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.planReady=true; onLoadFailed:root.planReady=false }
+  // One probe per candidate folder: does it hold a hero or top image?
+  Repeater {
+    model:root.folders
+    Item {
+      id:probe; required property string modelData; visible:false
+      readonly property string base:Quickshell.shellDir+"/assets/devices/"+modelData+"/"
+      property var hasHero:undefined
+      property var hasTop:undefined
+      readonly property var found:hasHero === true || hasTop === true ? true : hasHero === false && hasTop === false ? false : undefined
+      onFoundChanged:if (found !== undefined) root.setFolderImages(modelData,found)
+      Component.onCompleted:if (found !== undefined) root.setFolderImages(modelData,found)
+      FileView { id:probeHero; path:probe.base+"hero.png"; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:probe.hasHero=true; onLoadFailed:probe.hasHero=false }
+      FileView { id:probeTop; path:probe.base+"top.png"; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:probe.hasTop=true; onLoadFailed:probe.hasTop=false }
+      // A folder already found is reloaded only when the shown pictures are incomplete.
+      Connections { target:root; function onRecheck(all) { if (all || probe.found !== true) { probeHero.reload(); probeTop.reload() } } }
+    }
+  }
+  FileView { path:root.assetRoot ? root.assetRoot+"hotspots.json" : ""; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:{ let data; try { data=JSON.parse(text()) } catch(error) { data=({placeholder:true}) } root.loadedMetadata={path:path,data:data} } onLoadFailed:root.loadedMetadata={path:path,data:({placeholder:true})} }
+  FileView { id:heroFile; path:root.assetRoot ? root.assetRoot+"hero.png" : ""; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.heroLoaded=path; onLoadFailed:if (root.heroLoaded === path) root.heroLoaded="" }
+  FileView { id:rimFile; path:root.assetRoot ? root.assetRoot+"hero-rim.png" : ""; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.rimLoaded=path; onLoadFailed:if (root.rimLoaded === path) root.rimLoaded="" }
+  FileView { id:thumbFile; path:root.assetRoot ? root.assetRoot+"thumb.png" : ""; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.thumbLoaded=path; onLoadFailed:if (root.thumbLoaded === path) root.thumbLoaded="" }
+  FileView { id:planFile; path:root.assetRoot ? root.assetRoot+"top-down.png" : ""; preload:true; watchChanges:true; printErrors:false; onFileChanged:reload(); onLoaded:root.planLoaded=path; onLoadFailed:if (root.planLoaded === path) root.planLoaded="" }
   FileView { path:Quickshell.shellDir+"/assets/devices/silhouette.png"; preload:true; printErrors:false; onLoaded:root.silhouetteReady=true; onLoadFailed:root.silhouetteReady=false }
-  Timer { interval:5000; running:!root.heroReady || !root.thumbReady; repeat:true; onTriggered:{ heroFile.reload(); rimFile.reload(); thumbFile.reload(); planFile.reload() } }
+  // Pictures added while the app runs (or a folder that gains one) show up within a few seconds.
+  // A preferred folder that is still missing keeps being probed even while a complete
+  // fallback is shown, so a model's own pictures added later replace the fallback.
+  readonly property bool incomplete:!heroReady || !thumbReady
+  readonly property bool probing:incomplete || DeviceAssets.preferredMissing(folders,chosenFolder)
+  Timer { interval:5000; running:root.probing; repeat:true; onTriggered:{ root.recheck(root.incomplete); if (root.incomplete && root.assetRoot) { heroFile.reload(); rimFile.reload(); thumbFile.reload(); planFile.reload() } } }
   Item {
     id:frame
     width:Math.max(0,root.showCallouts ? root.width-2*(root.calloutWidth+32) : Math.min(840,root.width-16))

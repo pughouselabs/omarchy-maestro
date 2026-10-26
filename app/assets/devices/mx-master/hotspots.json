@@ -68,6 +68,9 @@
       "y": 0.46
     }
   ],
+  "credit_url": "https://sketchfab.com/3d-models/logitech-mx-master-2s-danish-blends-e8f3235951934a01aba4e0ee3de72e71",
+  "license": "CC BY-NC 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-nc/4.0/",
   "credit_changes": "Rendered with new lighting and camera; status light hidden; contact shadow added.",
   "inset_note": "thumb.png is a magnified, circularly masked crop of the thumb-side close-up; gesture lives on the main image."
 }

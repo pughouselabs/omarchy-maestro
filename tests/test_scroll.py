@@ -65,6 +65,10 @@ class CliTests(unittest.TestCase):
         self.addCleanup(stack.close)
         self.dev = SimpleNamespace(model="MX Master 2S", kind="mouse")
         self.find = stack.enter_context(patch.object(mouse, "find_mice", return_value=[self.dev]))
+        # These fakes have no unit ID; treat it as read (see test_daemon_cli for the gate).
+        stack.enter_context(
+            patch.object(cli, "guard_device", return_value=SimpleNamespace(expected="unit"))
+        )
         self.close = stack.enter_context(patch.object(hidpp, "close_devices"))
         self.stdout = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
         self.stderr = stack.enter_context(contextlib.redirect_stderr(io.StringIO()))

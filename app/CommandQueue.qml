@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
-import Quickshell.Io
 
 QtObject {
   id: root
@@ -28,11 +27,11 @@ QtObject {
     deadline.restart()
   }
   function finish(worker) {
-    if (!active || worker !== activeProcess || !worker.exited || !worker.outputDone || !worker.errorsDone) return
+    if (!active || worker !== activeProcess) return
     deadline.stop(); startGuard.stop()
     let job = active, data = null, message = ""
     try { data = JSON.parse(worker.output) } catch (error) { message = "Maestro returned an unreadable response." }
-    if (worker.timedOut) message = "Maestro took too long. Try again."
+    if (worker.failure) message = worker.failure
     else if (worker.code !== 0 && !data) message = worker.errors.trim().slice(0,240) || "Maestro could not complete this request."
     if (data && data.ok === false && !data.errors) message = data.message || data.error || "Maestro could not complete this request."
     let ok = worker.code === 0 && data !== null && data.ok !== false && !message
@@ -42,27 +41,17 @@ QtObject {
     launchTimer.restart()
   }
   property Component processFactory: Component {
-    Process {
+    BoundedProcess {
       id: worker
-      property string output: ""
-      property string errors: ""
-      property bool outputDone:false
-      property bool errorsDone:false
-      property bool exited:false
-      property int code:-1
-      property bool started:false
-      property bool timedOut:false
       onStarted: {
-        started = true
+        worker.started = true
         if (root.active && root.active.input !== undefined) {
           write(JSON.stringify(root.active.input) + "\n")
           // Flush queued data, then close stdin so the engine can read to EOF.
           stdinEnabled = false
         }
       }
-      onExited:function(exitCode) { code = exitCode; exited = true; root.finish(worker) }
-      stdout:StdioCollector { waitForEnd:true; onStreamFinished:{ worker.output = text; worker.outputDone = true; root.finish(worker) } }
-      stderr:StdioCollector { waitForEnd:true; onStreamFinished:{ worker.errors = text; worker.errorsDone = true; root.finish(worker) } }
+      onCompleted: root.finish(worker)
     }
   }
   property Timer launchTimer:Timer { interval:1; onTriggered:root.next() }
@@ -71,21 +60,14 @@ QtObject {
     onTriggered: {
       let worker = root.activeProcess
       if (!worker || worker.started || worker.running) return
-      worker.errors = "Could not start Maestro. Check that it is installed."
-      worker.outputDone = true; worker.errorsDone = true; worker.exited = true; worker.code = -1
-      root.finish(worker)
+      worker.abort("Could not start Maestro. Check that it is installed.")
     }
   }
   property Timer deadline:Timer {
     onTriggered: {
       let worker = root.activeProcess
       if (!worker) return
-      worker.timedOut = true
-      if (worker.running) worker.signal(9)
-      else {
-        worker.code = -1; worker.exited = true; worker.outputDone = true; worker.errorsDone = true
-        root.finish(worker)
-      }
+      worker.abort("Maestro took too long. Try again.")
     }
   }
 }

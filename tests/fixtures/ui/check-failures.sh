@@ -50,6 +50,15 @@ start MAESTRO_CONTROLS_FIXTURE=controls-read-error
 jq -e '.devices[0].dpi.error != null and .devices[0].smartshift == null and .config.version == 1' >/dev/null <<< "$result"
 MAESTRO_CAPTURE_SUFFIX=-read-error "$repo/tests/fixtures/ui/capture-app.sh" point >/dev/null
 printf '%s\n' 'PASS: partial controls read failure keeps settings available'
+start MAESTRO_FIXTURE_OPTIONS_FAILURE=1
+jq -e '.config.version == 1 and (.devices | length) > 0 and (.devices[0] | has("options") | not) and .writable == false and (.message | contains("could not be read"))' >/dev/null <<< "$result"
+# Restore first so the save below really changes a value.
+call fixtureCheck restore
+idle
+call fixtureCheck save
+idle
+jq -e '(.toast | contains("Saved") | not) and (.message | contains("could not be read")) and .writable == false' >/dev/null <<< "$result"
+printf '%s\n' 'PASS: failed mouse options keep its controls unavailable and never report Saved'
 start MAESTRO_CLI=/tmp/maestro-ui-missing-executable
 jq -e '.config == {} and (.message | contains("Could not start"))' >/dev/null <<< "$result"
 printf '%s\n' 'PASS: failed executable drains queue'

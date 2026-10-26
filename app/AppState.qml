@@ -14,7 +14,7 @@ QtObject {
     preload:root.fixtureMode; printErrors:false
     onLoaded: { try { root.fixtureApplications=JSON.parse(text()) } catch(error) { root.fixtureApplications=[] } }
   }
-  property string versionString:"0.3.0"
+  property string versionString:"0.3.1"
   property FileView versionFile:FileView {
     path:root.queue.repoPath + "/pyproject.toml"; preload:true; printErrors:false
     onLoaded: { const match=text().match(/^version\s*=\s*"([^"]+)"/m); if (match) root.versionString=match[1] }
@@ -36,7 +36,8 @@ QtObject {
   readonly property var device: deviceIndex >= 0 && devices.length > deviceIndex ? devices[deviceIndex] : null
   readonly property var profiles: config.profiles || []
   readonly property var automations: config.automations || ({})
-  readonly property bool writable: configLoaded && device !== null && device.writable === true && !applying
+  // A mouse's controls stay unavailable until its resolved options load.
+  readonly property bool writable: configLoaded && device !== null && device.writable === true && device.options !== undefined && !applying
   readonly property bool builtInThumbWheel:device !== null && !available("thumb_wheel") && device.thumb_wheel !== undefined && String(device.model || "").indexOf("MX Master") === 0
   readonly property string serviceNotice:"Changes are saved, but won't take effect until the Maestro service starts."
 
@@ -119,6 +120,73 @@ QtObject {
     const identity = device && device.identity, next = visibleDevices(items)
     const position = identity ? next.findIndex(function(item) { return sameAction(item.identity,identity) }) : 0
     devices = next; deviceIndex = next.length ? position : -1
+    loadDeviceOptions()
+  }
+  // The device list leaves out each mouse's resolved options so it stays
+  // within the 64 KiB response limit with several mice. Read them for one
+  // mouse at a time; each of those responses fits the configuration budget.
+  // A reply only counts for the mouse it was requested for; a list that
+  // changed in the meantime keeps its own entries.
+  function mergeOptions(items, number, fresh) {
+    const at = items.findIndex(function(item) {
+      return item.device === number && sameAction(item.identity,fresh.identity) && sameAction(item.selector,fresh.selector)
+    })
+    if (at < 0) return null
+    const next = items.slice(); next[at] = fresh
+    return next
+  }
+  function withOptions(number, callback) {
+    queue.request(["controls","--mouse",String(number),"--json"],undefined,function(ok,data,error) {
+      const fresh = ok && data && Array.isArray(data.devices) && data.devices.length === 1 && data.devices[0].options !== undefined ? data.devices[0] : null
+      callback(fresh,error)
+    })
+  }
+  // Calls back with (ok, data, error, optionsFailed). A mouse whose options
+  // could not be read stays in the list without options, so its controls stay
+  // unavailable, and optionsFailed tells the caller not to report success.
+  function loadControls(callback) {
+    queue.request(["controls","--json"],undefined,function(ok,data,error) {
+      if (!ok || !data || !Array.isArray(data.devices)) { callback(false,data,error,false); return }
+      const numbers = visibleDevices(data.devices).map(function(item) { return item.device }).filter(Number.isInteger)
+      let failure = ""
+      function step(items, at) {
+        if (at >= numbers.length) { callback(true,Object.assign({},data,{devices:items}),failure,failure !== ""); return }
+        root.withOptions(numbers[at],function(fresh,detail) {
+          const next = fresh ? root.mergeOptions(items,numbers[at],fresh) : null
+          if (!next && !failure) failure = detail || "This mouse's settings could not be read. Try Refresh."
+          step(next || items,at + 1)
+        })
+      }
+      step(data.devices,0)
+    })
+  }
+  function loadDeviceOptions() {
+    const item = device
+    if (!item || item.options !== undefined || !Number.isInteger(item.device)) return
+    withOptions(item.device,function(fresh) {
+      if (!fresh) { if (!message) message = "This mouse's settings could not be read. Try Refresh."; return }
+      // Ignore a reply for a mouse that is no longer in the current list.
+      const next = root.mergeOptions(devices,item.device,fresh)
+      if (next) devices = next
+    })
+  }
+  onDeviceIndexChanged: loadDeviceOptions()
+  function releaseButtons() {
+    if (!device || applying) return
+    const number = device.device
+    // The selector names this exact mouse, so a changed list is refused
+    // before anything is written instead of releasing another mouse.
+    if (!Number.isInteger(number) || !device.selector) { message = "Refresh to identify this mouse before releasing its buttons."; return }
+    applying = true; message = ""
+    queue.request(["release-buttons","--mouse",String(number),"--selector",JSON.stringify(device.selector),"--json"],undefined,function(ok,data,error) {
+      applying = false
+      if (ok && data.ok === true) {
+        const released = (data.devices || []).reduce(function(all,item) { return all.concat(item.released || []) },[])
+        toast = released.length ? "Released the " + released.join(", ") : "Nothing needed releasing"
+        toastTimer.restart()
+      } else report(data,error || "The button could not be released. Turn the mouse off and on.")
+      root.refresh()
+    })
   }
   function setGestureMode(bundle) {
     // A profile cannot erase a mapping inherited from All applications.
@@ -169,10 +237,15 @@ QtObject {
   function refresh() {
     if (applying || loading) return
     loading = true; message = ""
-    queue.request(["controls", "--json"], undefined, function(ok, data, error) {
+    loadControls(function(ok, data, error, optionsFailed) {
       if (ok && Array.isArray(data.devices)) {
         updateDevices(data.devices)
         serviceInactive = data.daemon === false
+        const problems = data.devices.map(function(item) { return item && item.problem ? item.problem : "" }).filter(function(item) { return item !== "" })
+        // The service is paused while another app (Solaar, logiops) owns the mouse.
+        if (typeof data.problem === "string" && data.problem) problems.unshift(data.problem)
+        if (optionsFailed) problems.push("This mouse's settings could not be read. Try Refresh.")
+        if (problems.length) message = problems.join(" · ")
       }
       else { devices = []; message = error || warningText(data && data.errors) || "Mouse controls are unavailable. Wake the mouse and try Refresh." }
       if (deviceIndex >= devices.length) deviceIndex = 0
@@ -224,16 +297,21 @@ QtObject {
       if (ok && data.version === 1) {
         config = data; undoConfig = previous; fieldErrors = []
         if (profileIndex >= profiles.length) profileIndex = -1
-        queue.request(["controls","--json"],undefined,function(loaded,controls,failure) {
+        root.loadControls(function(loaded,controls,failure,optionsFailed) {
           applying = false
-          if (loaded && Array.isArray(controls.devices)) {
+          if (loaded && !optionsFailed && Array.isArray(controls.devices)) {
             updateDevices(controls.devices)
             toast = savedMessage(result,label); toastTimer.restart()
+          } else if (loaded && Array.isArray(controls.devices)) {
+            // The change was saved, but a mouse's options could not be read
+            // back: keep that mouse's controls unavailable and say so.
+            updateDevices(controls.devices)
+            report(null,"Saved, but this mouse's settings could not be read. Try Refresh.")
           } else {
             configLoaded = false
             report(controls,failure || "Saved, but this mouse's settings could not be read. Try Refresh.")
           }
-          if (callback) callback(loaded && configLoaded)
+          if (callback) callback(loaded && !optionsFailed && configLoaded)
         })
       } else {
         applying = false; configLoaded = false; undoConfig = null

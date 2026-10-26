@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.nodrej.maestro",
+  "id": "io.github.pughouselabs.maestro",
   "name": "Maestro",
-  "version": "0.3.0",
-  "author": "nodrej",
+  "version": "0.3.1",
+  "author": "Pughouse Labs",
   "license": "MIT",
   "description": "Battery, DPI, SmartShift, buttons, gestures and app profiles for Logitech MX mice",
   "kinds": ["bar-widget"],

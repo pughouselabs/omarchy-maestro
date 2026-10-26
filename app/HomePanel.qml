@@ -27,7 +27,8 @@ Item {
                 width:parent.width-x-24; spacing:deviceCard.stacked ? 8 : 16
                 Row { width:parent.width; spacing:8
                   Rectangle { width:8; height:8; radius:4; color:deviceCard.modelData.writable ? Theme.accent : Theme.muted; anchors.verticalCenter:parent.verticalCenter
-                    Controls.ToolTip.visible:connectionHover.containsMouse; Controls.ToolTip.text:deviceCard.modelData.writable ? "Connected" : "Read only"; MouseArea { id:connectionHover; anchors.fill:parent; hoverEnabled:true }
+                    Controls.ToolTip { visible:connectionHover.containsMouse; contentItem:Text { text:deviceCard.modelData.writable ? "Connected" : "Read only"; textFormat:Text.PlainText; color:Theme.foreground } }
+                    MouseArea { id:connectionHover; anchors.fill:parent; hoverEnabled:true }
                   }
                   Label { width:parent.width-16; text:deviceCard.modelData.model; font.pixelSize:Style.fontTitle; font.weight:Font.DemiBold; maximumLineCount:1; elide:Text.ElideRight }
                 }

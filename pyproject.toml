@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maestro-mouse"
-version = "0.3.0"
+version = "0.3.1"
+authors = [{ name = "Pughouse Labs" }]
 description = "Linux settings and controls for Logitech MX mice"
 readme = "README.md"
 requires-python = ">=3.10"

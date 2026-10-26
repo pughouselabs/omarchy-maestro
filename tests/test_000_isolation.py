@@ -11,6 +11,7 @@ class IsolationTests(unittest.TestCase):
         for name in ("XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "MAESTRO_CONFIG_HOME"):
             self.assertTrue(Path(os.environ[name]).is_relative_to(root), name)
         self.assertNotIn("HYPRLAND_INSTANCE_SIGNATURE", os.environ)
+        self.assertEqual(os.environ["XDG_CURRENT_DESKTOP"], "Hyprland")
 
 
 if __name__ == "__main__":

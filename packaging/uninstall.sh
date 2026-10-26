@@ -29,7 +29,7 @@ if [[ -d "$data_home/maestro" ]]; then
   rm -rf "$data_home/maestro"
   printf 'Removed %s\n' "$data_home/maestro"
 fi
-printf 'Remove the system udev rule with:\n  sudo rm -f /etc/udev/rules.d/70-maestro.rules\n'
+printf 'Remove the system udev rules with:\n  sudo rm -f /etc/udev/rules.d/70-maestro.rules /etc/udev/rules.d/71-maestro-uinput.rules\n'
 printf 'Remove uinput module loading with:\n  sudo rm -f /etc/modules-load.d/maestro-uinput.conf\n'
 printf 'Then reload rules with:\n  sudo udevadm control --reload-rules && sudo udevadm trigger\n'
 printf 'Removed Maestro user installation.\n'

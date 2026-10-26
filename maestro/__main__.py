@@ -5,6 +5,7 @@
   maestro dpi <value> [--json]
   maestro smartshift [--mode ratchet|freespin] [--threshold 1-255] [--json]
   maestro scroll --invert on|off [--json]
+  maestro release-buttons [--mouse N] [--json]
 
 Selectors: --mouse N (0-based, as shown by status) or --device NAME-OR-PATH.
 They may appear before or after the command. A receiver path shared by several
@@ -24,20 +25,42 @@ from types import SimpleNamespace
 from . import hidpp, mouse
 from .daemon import ipc
 from .daemon.catalog import catalog as action_catalog
-from .daemon.catalog import control_device
-from .daemon.config import ConfigError, ConfigFile, _decode, full_config, validate_action
-from .daemon.events import Diversion, supported_device
+from .daemon.catalog import control_device, device_selector, valid_selector
+from .daemon.config import (
+    ConfigError,
+    ConfigFile,
+    _decode,
+    full_config,
+    read_config,
+    validate_action,
+)
+from .daemon.events import (
+    IDENTITY_PROBLEM,
+    Diversion,
+    IdentityChanged,
+    Unidentified,
+    guard_device,
+    supported_device,
+)
+from .daemon.ownership import DiversionLedger
 
 
 def _print_status(statuses: list[dict], numbers: list[int]) -> None:
     for n, s in zip(numbers, statuses, strict=False):
-        where = f"receiver slot {s['index']}" if s["receiver"] else "Bluetooth"
+        # A mouse that stopped answering can come back with fewer keys.
+        receiver = s.get("receiver")
+        link = f"receiver slot {s.get('index')}" if receiver else "Bluetooth"
+        where = [s.get("path") or "unknown path"] + ([link] if receiver is not None else [])
+        offline = "error" in s
         print(
-            f"[{n}] {s['name']}  ({s['path']}, {where})"
+            f"[{n}] {s.get('name') or s.get('model') or 'Logitech mouse'}  ({', '.join(where)})"
+            f"{'  disconnected' if offline else ''}"
             f"{'  unsupported' if not s.get('supported', True) else ''}"
         )
         if not s.get("supported", True):
             continue
+        if s.get("problem"):
+            print(f"    Problem     {s['problem']}")
         b = s.get("battery")
         if b and "percent" in b:
             print(f"    Battery     {b['percent']}% ({b['status']})")
@@ -115,7 +138,16 @@ def _absence() -> str:
     return "No supported MX mouse found (check pairing and Bluetooth connection)."
 
 
-_DAEMON_FIELDS = {"writable", "online", "profile", "errors", "diverted_controls", "thumb_diverted"}
+_DAEMON_FIELDS = {
+    "writable",
+    "online",
+    "profile",
+    "errors",
+    "diverted_controls",
+    "thumb_diverted",
+    "release_available",
+    "unit_key",
+}
 
 
 class _RemoteDevice:
@@ -155,14 +187,28 @@ def _from_daemon(args, response):
             else "invalid daemon response"
         )
         raise RuntimeError(error)
+    problem = response.get("problem") if response.get("paused_by") else None
+    if problem and args.command not in ("status", "diagnose"):
+        # The service has handed the mouse to another app and sends no HID++.
+        print(f"maestro: {problem}", file=sys.stderr)
+        return 1
     mice = [_RemoteDevice(status) for status in response["devices"]]
     selected = _select(mice, args, all_by_default=args.command in ("status", "diagnose"))
     if args.command == "status":
         if args.mouse is None and args.device is None and not args.all:
             selected = [m for m in selected if _supported_device(m)]
         statuses = [m.status for m in selected]
-        if args.json:
+        if getattr(args, "with_state", False):
+            state = {
+                "devices": statuses,
+                "paused_by": response.get("paused_by"),
+                "problem": problem,
+            }
+            print(json.dumps(state))
+        elif args.json:
             print(json.dumps(statuses))
+        elif problem:
+            print(f"Paused: {problem}")
         elif statuses:
             _print_status(statuses, [mice.index(m) for m in selected])
         elif response.get("sleeping"):
@@ -237,25 +283,44 @@ def _new_command(args):
             response = ipc.request_if_running({"op": "catalog"})
             result = response["catalog"] if response else action_catalog()
         elif command == "controls":
-            response = ipc.request_if_running({"op": "controls"})
+            # Without --mouse the list leaves out each mouse's resolved options,
+            # which keeps the response bounded; --mouse N adds them for one mouse.
+            selected = args.mouse
+            if getattr(args, "device", None) is not None:
+                raise ValueError("controls selects a mouse with --mouse N")
+            message = {"op": "controls"}
+            if selected is not None:
+                message["device"] = selected
+            response = ipc.request_if_running(message)
             if response is not None:
+                if response.get("ok") is not True:
+                    raise RuntimeError(response.get("error", "daemon rejected the request"))
                 result = {"daemon": True, "devices": response["devices"]}
+                if response.get("paused_by"):
+                    result["paused_by"] = response["paused_by"]
+                    result["problem"] = response.get("problem")
             else:
                 mice = mouse.find_mice(include_unsupported=True)
                 raw = ConfigFile().raw
                 try:
+                    if selected is not None and not 0 <= selected < len(mice):
+                        raise ValueError(f"no mouse {selected}; found {len(mice)}")
                     devices = []
                     for i, device in enumerate(mice):
-                        if not supported_device(device):
+                        if not supported_device(device) or selected not in (None, i):
                             continue
                         status = dict(mouse.status(device), writable=device.writable)
                         diversion = Diversion(device) if device.writable else None
-                        devices.append(control_device(status, i, diversion, raw))
+                        devices.append(
+                            control_device(
+                                status, i, diversion, raw, include_options=selected is not None
+                            )
+                        )
                     result = {"daemon": False, "devices": devices}
                 finally:
                     hidpp.close_devices(mice)
         elif command == "test-action":
-            action = _decode_action(sys.stdin.read())
+            action = _decode_action(read_config(sys.stdin))
             response = ipc.request_if_running({"op": "test_action", "action": action})
             if response is None:
                 raise RuntimeError("test-action requires the running maestrod daemon")
@@ -266,7 +331,7 @@ def _new_command(args):
             operation = args.config_command
             message = {"op": f"config_{operation}"}
             if operation == "apply":
-                message["config"] = _decode(sys.stdin.read())
+                message["config"] = _decode(read_config(sys.stdin))
             elif operation == "restore":
                 message["name"] = args.name
             response = ipc.request_if_running(message)
@@ -306,6 +371,104 @@ def _new_command(args):
         return _json_error(exc)
 
 
+def _release_buttons(args):
+    """Explicitly undivert mouse controls Maestro may have left behind."""
+    try:
+        response = ipc.request_if_running({"op": "status"})
+        if response is not None:
+            if not isinstance(response, dict) or response.get("ok") is not True:
+                raise RuntimeError("invalid daemon response")
+            if response.get("paused_by"):
+                raise RuntimeError(response.get("problem") or "the service is paused")
+            mice = [_RemoteDevice(status) for status in response["devices"]]
+            selected = _select(mice, args, all_by_default=True)
+            selected = [m for m in selected if _supported_device(m)]
+            if not selected:
+                print("No supported MX mouse found; wake it and retry.", file=sys.stderr)
+                return 2
+            expected = _expected_selector(args, selected)
+            results = []
+            for m in selected:
+                status = response["devices"][mice.index(m)]
+                selector = device_selector(
+                    status["path"], status["index"], status.get("model"), status.get("unit_key")
+                )
+                if expected is not None and selector != expected:
+                    raise ValueError("device identity changed; read status and retry")
+                result = _ipc_result(
+                    {"op": "release_buttons", "device": mice.index(m), "selector": selector}
+                )
+                results.extend(result["devices"])
+        else:
+            results = _release_offline(args)
+            if results is None:
+                print(_absence(), file=sys.stderr)
+                return 2
+    except ValueError as e:
+        print(f"maestro: {e}", file=sys.stderr)
+        return 2
+    except (hidpp.HidppError, hidpp.NoResponse, OSError, RuntimeError, KeyError) as e:
+        print(f"maestro: {e}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps({"ok": True, "devices": results}))
+        return 0
+    for item in results:
+        names = item["released"]
+        where = f"{item['model']} (mouse {item['device']})"
+        if names:
+            print(f"Released the {', '.join(names)} on {where}.")
+        else:
+            print(f"Nothing to release on {where}.")
+    return 0
+
+
+def _expected_selector(args, selected):
+    """The mouse identity the caller chose (``--selector``), checked before any write."""
+    if args.selector is None:
+        return None
+    try:
+        expected = json.loads(args.selector)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--selector: invalid JSON: {exc}") from exc
+    if not valid_selector(expected):
+        raise ValueError("--selector needs path, index, model and unit")
+    if args.mouse is None or len(selected) != 1:
+        raise ValueError("--selector needs --mouse N")
+    return expected
+
+
+def _release_offline(args):
+    mice = mouse.find_mice(include_unsupported=True)
+    try:
+        selected = _select(mice, args, all_by_default=True)
+        selected = [m for m in selected if _supported_device(m)]
+        if not selected:
+            return None
+        expected = _expected_selector(args, selected)
+        results = []
+        for m in selected:
+            if not getattr(m, "writable", True):
+                raise ValueError("mouse identity could not be verified; writes are disabled")
+            diversion = Diversion(m, ledger=DiversionLedger())
+            if expected is not None and expected != device_selector(
+                m.node.path, m.index, m.model, diversion.unit_key
+            ):
+                raise ValueError("device identity changed; read status and retry")
+            try:
+                # Rereads the live unit ID right before the first write.
+                released = diversion.release_leftovers(
+                    expected["unit"] if expected is not None else None,
+                    required=expected is not None,
+                )
+            except IdentityChanged as exc:
+                raise ValueError("device identity changed; read status and retry") from exc
+            results.append({"device": mice.index(m), "model": m.model, "released": released})
+        return results
+    finally:
+        hidpp.close_devices(mice)
+
+
 def _decode_action(data):
     import json as json_module
 
@@ -326,6 +489,11 @@ def main(argv: list[str] | None = None) -> int:
     _add_selector(p_status, suppress=True)
     p_status.add_argument("--all", action="store_true", help="also list unsupported Logitech mice")
     p_status.add_argument("--json", action="store_true")
+    p_status.add_argument(
+        "--with-state",
+        action="store_true",
+        help="JSON object with the mice and why the service is paused, if it is",
+    )
     p_diagnose = sub.add_parser("diagnose", help="shareable, identifier-free device report")
     _add_selector(p_diagnose, suppress=True)
     p_diagnose.add_argument("--json", action="store_true")
@@ -349,9 +517,26 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("catalog", help="list curated actions").add_argument(
         "--json", action="store_true"
     )
-    sub.add_parser("controls", help="list mouse controls").add_argument(
-        "--json", action="store_true"
+    p_controls = sub.add_parser("controls", help="list mouse controls")
+    p_controls.add_argument("--json", action="store_true")
+    p_controls.add_argument(
+        "--mouse",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="one mouse, including its resolved options",
     )
+    p_release = sub.add_parser(
+        "release-buttons",
+        help="undivert buttons Maestro may have left diverted (explicit recovery)",
+    )
+    _add_selector(p_release, suppress=True)
+    p_release.add_argument(
+        "--selector",
+        metavar="JSON",
+        default=None,
+        help="the mouse's selector from 'controls --json'; refuse if that mouse changed",
+    )
+    p_release.add_argument("--json", action="store_true")
     p_config = sub.add_parser("config", help="read or change the settings app configuration")
     config_sub = p_config.add_subparsers(dest="config_command", required=True)
     config_sub.add_parser("get")
@@ -366,6 +551,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in ("catalog", "controls", "config", "test-action"):
         return _new_command(args)
+    if args.command == "release-buttons":
+        return _release_buttons(args)
 
     if args.command == "smartshift" and args.mode is None and args.threshold is None:
         parser.error("give --mode and/or --threshold")
@@ -388,7 +575,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.mouse is None and args.device is None and not args.all:
                 selected = [m for m in selected if _supported_device(m)]
             statuses = [mouse.status(m) for m in selected]
-            if args.json:
+            if args.with_state:
+                print(json.dumps({"devices": statuses, "paused_by": None, "problem": None}))
+            elif args.json:
                 print(json.dumps(statuses))
             elif statuses:
                 numbers = {id(m): i for i, m in enumerate(mice)}
@@ -429,6 +618,10 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        # Read the unit ID now; each write below reads it again and must match.
+        if guard_device(m).expected is None:
+            print(f"maestro: {IDENTITY_PROBLEM}", file=sys.stderr)
+            return 2
         if args.command == "dpi":
             result = str(mouse.set_dpi(m, args.value))
         elif args.command == "smartshift":
@@ -441,6 +634,12 @@ def main(argv: list[str] | None = None) -> int:
             result = "inverted" if w.inverted else "normal"
         print(json.dumps(mouse.status(m)) if args.json else result)
         return 0
+    except Unidentified:
+        print(f"maestro: {IDENTITY_PROBLEM}", file=sys.stderr)
+        return 2
+    except IdentityChanged:
+        print("maestro: device identity changed; read status and retry", file=sys.stderr)
+        return 2
     except ValueError as e:
         print(f"maestro: {e}", file=sys.stderr)
         return 2

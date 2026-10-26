@@ -9,7 +9,7 @@ import qs.Ui as Ui
 
 Ui.Panel {
   id: root
-  moduleName: "io.github.nodrej.maestro"
+  moduleName: "io.github.pughouselabs.maestro"
   manageIpc: false
   property var hostWidget: null
   property Item anchorItem: null
@@ -18,6 +18,7 @@ Ui.Panel {
   readonly property var smartshift: hostWidget ? hostWidget.section("smartshift") : null
   readonly property var wheel: hostWidget ? hostWidget.section("wheel") : null
   readonly property bool busy: hostWidget ? hostWidget.busy : false
+  readonly property string paused: hostWidget ? hostWidget.paused : ""
   readonly property var presets: {
     var setting = root.setting("dpiPresets", "800, 1000, 1600, 2400")
     var values = Array.isArray(setting) ? setting : String(setting).split(",")
@@ -46,6 +47,7 @@ Ui.Panel {
     return ""
   }
   readonly property string heroStatus: {
+    if (paused) return "Paused"
     if (!mouse) return busy ? "Looking for your mouse…" : "Not connected"
     var parts = [connectionLabel, hostWidget.batteryState].filter(function(part) { return part !== "" })
     return parts.length ? parts.join(" · ") : "Connected"
@@ -188,8 +190,12 @@ Ui.Panel {
           }
 
           Caption {
-            visible: !root.mouse && !root.busy
+            visible: !root.mouse && !root.busy && !root.paused
             text: "Move the mouse to wake it, then open this panel again."
+          }
+          Caption {
+            visible: root.paused !== ""
+            text: root.hostWidget ? root.hostWidget.pausedLabel + ". Maestro resumes by itself once it closes." : ""
           }
           Caption {
             visible: root.hostWidget !== null && root.hostWidget.errorMessage !== ""

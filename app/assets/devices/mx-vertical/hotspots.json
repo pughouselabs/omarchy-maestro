@@ -1,0 +1,21 @@
+{
+  "image": "hero.png",
+  "credit": "MX Vertical 3D model by arc98tect (sketchfab.com/3d-models/logitech-mx-vertical-mouse-ab3c05e72e7c46d39411478431b1d771), licensed CC BY 4.0; rendered for Maestro.",
+  "hotspots": [
+    {"name": "middle", "label": "Middle click", "x": 0.455, "y": 0.125, "side": "right"},
+    {"name": "forward", "label": "Forward", "x": 0.31, "y": 0.27, "side": "left"},
+    {"name": "back", "label": "Back", "x": 0.345, "y": 0.34, "side": "left"}
+  ],
+  "image_dark": "hero-rim.png",
+  "inset_image": "thumb.png",
+  "top_down_image": "top-down.png",
+  "inset_hotspots": [
+    {"name": "forward", "label": "Forward", "x": 0.488, "y": 0.433},
+    {"name": "back", "label": "Back", "x": 0.558, "y": 0.592}
+  ],
+  "credit_url": "https://sketchfab.com/3d-models/logitech-mx-vertical-mouse-ab3c05e72e7c46d39411478431b1d771",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "credit_changes": "Rendered with new lighting and camera; printed logo and status light removed; contact shadow added.",
+  "inset_note": "thumb.png is a magnified, circularly masked crop of the thumb-side view."
+}

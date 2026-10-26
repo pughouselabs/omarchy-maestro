@@ -1,9 +1,11 @@
+# Maintainer: Pughouse Labs
+# Local source recipe. Generate and verify checksums before building; see docs/install.md.
 pkgname=maestro-mouse
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc='Linux settings and controls for Logitech MX mice'
 arch=('any')
-url='https://github.com/nodrej/omarchy-maestro'
+url='https://github.com/pughouselabs/omarchy-maestro'
 license=('MIT')
 depends=('python>=3.10')
 makedepends=('python-setuptools' 'python-build' 'python-installer')
@@ -23,10 +25,15 @@ check() {
 package() {
   cd "$srcdir/maestro-${pkgver}"
   python -m installer --destdir="$pkgdir" dist/*.whl
+  # Required hidraw access is active once installed.
   install -Dm644 "$srcdir/maestro-${pkgver}/packaging/udev/70-maestro.rules" \
     "$pkgdir/usr/lib/udev/rules.d/70-maestro.rules"
+  # uinput access is optional and only for maestrod: ship it inactive. To
+  # enable it, copy both files into /etc (see docs/install.md).
+  install -Dm644 "$srcdir/maestro-${pkgver}/packaging/udev/71-maestro-uinput.rules" \
+    "$pkgdir/usr/share/$pkgname/optional/71-maestro-uinput.rules"
   install -Dm644 "$srcdir/maestro-${pkgver}/packaging/modules-load/maestro-uinput.conf" \
-    "$pkgdir/usr/lib/modules-load.d/maestro-uinput.conf"
+    "$pkgdir/usr/share/$pkgname/optional/maestro-uinput.conf"
   if [[ -f "$srcdir/maestro-${pkgver}/packaging/systemd/maestrod.service" ]]; then
     install -dm755 "$pkgdir/usr/lib/systemd/user"
     sed 's|^ExecStart=.*|ExecStart=/usr/bin/maestrod|' \

@@ -10,8 +10,21 @@ not captured, so complete gesture operation on the 2S remains unverified.
 
 ## Start locally
 
+Configuration files and backups share a 48 KiB budget, measured as UTF-8 JSON
+with indentation, escaping, and all built-in defaults included. This leaves
+room in the 64 KiB service message for its envelope. Limits are 32 profiles,
+16 device rules, 32 Smart Actions, 256 total stored steps, 50 expanded steps
+per routine, 500 characters per label, and 128 command arguments of at most
+1024 characters each. Existing delay, text and nesting limits still apply.
+Reads are bounded before JSON parsing. An oversized edit or backup is rejected;
+the service keeps its last good configuration. Move the oversized file aside
+and reduce it or restore a smaller backup before saving again.
+
 Keep Solaar and logiops stopped, including their background services. Maestro
 checks for them at startup and every five seconds. One process must own HID++.
+While either one runs, the service pauses instead of exiting: it gives back
+any buttons it diverted, sends nothing to the mouse, reports the reason in
+status, the bar and the settings app, and checks again about every 15 seconds.
 While the daemon is running, `bin/maestro` and the bar widget use its socket for
 settings and status. Their plain text and JSON output keep the same format.
 The CLI uses direct HID++ only when neither the daemon socket nor its ownership
@@ -49,16 +62,17 @@ refuses to divert controls if it cannot create its virtual input device. This
 also protects against buttons being consumed with no way to emit their actions.
 Mouse hidraw access is required separately.
 
-`packaging/udev/70-maestro.rules` grants the active seat user access to
-Logitech hidraw nodes and to `/dev/uinput`, and
+The required `packaging/udev/70-maestro.rules` grants the active seat user
+access to Logitech hidraw nodes only. The separate, optional
+`packaging/udev/71-maestro-uinput.rules` grants `/dev/uinput`, and
 `packaging/modules-load/maestro-uinput.conf` loads the `uinput` module at boot.
-The uinput part of the rule is:
+The uinput rule is:
 
 ```udev
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
 ```
 
-If you choose to install them, copy both files into `/etc`, load the `uinput`
+If you choose to install the optional files, copy both into `/etc`, load the `uinput`
 kernel module, reload udev rules, and trigger the devices, or log out and back
 in (the README lists the exact commands). Verify `test -w /dev/uinput` as the
 desktop user. Some distributions instead use an `input` group; follow their
@@ -311,13 +325,17 @@ expire after five seconds. Response fields may be added later. Errors return
 {"op":"set","device":0,"settings":{"smartshift":{"mode":"ratchet","threshold":20}}}
 {"op":"set","device":0,"settings":{"invert":true}}
 {"op":"reload"}
+{"op":"controls"}
+{"op":"controls","device":0}
+{"op":"release_buttons","device":0}
 ```
 
 `device` is the zero-based position in status `devices`, default 0; receiver
 slot is separately reported as `index`. `status` returns `ok`, `devices`,
 `config_error`, `window`, and `window_error`. Each device includes the existing
 mouse status fields plus `online`, `profile`, `errors`, `diverted_controls`,
-and `thumb_diverted`. `writable` reports the core's identity-based write
+`thumb_diverted` and `release_available` (true while a control is busy), and
+`problem` when a control is unavailable. `writable` reports the core's identity-based write
 permission. Unsupported Logitech mice can appear for `maestro status --all`
 without action sessions. The daemon also includes `sleeping` and `scan_errors`.
 
@@ -334,6 +352,26 @@ Successful `set` responses include the mouse's core `status` snapshot. Clients
 can include `selector` with `path`, `index`, and `model` to reject a changed
 device between selection and the write. `diagnose` requests are also routed
 through the owner and accept an optional list of `devices` numbers.
+
+`controls` lists the settings-app view of every supported mouse without
+resolved options, so the response stays within the message limit with several
+mice. With `device` it returns only that mouse and adds its resolved
+`options`, which the configuration budget keeps within the limit
+(`maestro controls --mouse N --json` from the command line).
+
+`release_buttons` is the explicit recovery for a button that is busy (see
+[troubleshooting](troubleshooting.md)). Without `device` it applies to every
+mouse. With `device` it also needs that mouse's `selector`, copied from
+`controls` (or built from `status`): `{"path", "index", "model", "unit"}`,
+where `unit` is the status field `unit_key`, a short pseudonymous tag of the
+mouse's unit ID (null when the mouse reports none; such a mouse is read-only
+and nothing is written to it). If a different mouse now
+sits at that device number, the request is refused before anything is written. It clears temporary diversion on each control Maestro can divert that
+the service does not own, plus the thumb wheel, then lets the service take the
+controls over. The response lists `devices` with `device`, `model` and the
+plain names in `released`. `maestro release-buttons [--mouse N]` uses it while
+the service runs and talks to the mouse directly otherwise; the settings app
+passes `--selector JSON` so the release only ever reaches the mouse it shows.
 
 Settings writes validate against the mouse, confirm readback, and save JSON
 with an atomic replacement. The previous file is backed up as `config.json.bak`
@@ -356,10 +394,14 @@ pipx put `maestrod` there; for a plugin checkout, link the checkout's
 `systemctl --user enable --now maestrod.service`. Use a systemd drop-in if your
 `maestrod` lives elsewhere. Import compositor environment variables into the
 user manager when your desktop does not do so automatically (Omarchy does). The
-unit runs as your desktop user, never root.
+unit runs as your desktop user, never root. systemd allows at most five starts
+in five minutes (the first start counts), then stops restarting it after a
+crash; `journalctl --user -u maestrod` shows why it stopped.
 
 Maestro never installs or enables the service or udev rules by itself. The Arch
-package installs the unit and rules but leaves the service disabled.
+package installs the unit and the required hidraw rule but leaves the service
+disabled and ships the optional uinput rule inactive (see
+[install](install.md)).
 
 ## Stop and undo
 
@@ -376,8 +418,11 @@ original values with the standalone CLI after the daemon has stopped. Disable
 and remove the user unit and udev rule if you installed them.
 
 No process can run cleanup after SIGKILL, a kernel failure, or a disconnected
-receiver. If cleanup reports a lost mouse, power-cycle that mouse to clear
-temporary diversion, then restart Maestro. Never leave a hardware experiment
+receiver. Maestro records each diversion durably before making it, so the
+next start can tell you a button was left taken, but it never takes one back
+by itself (see [troubleshooting](troubleshooting.md)). Choose **Release
+button** in the settings app, run `maestro release-buttons`, or power-cycle
+that mouse to clear temporary diversion. Never leave a hardware experiment
 running unattended. Real hardware write checks must snapshot settings, use a
 `finally` to restore them, and confirm readback.
 

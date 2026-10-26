@@ -48,6 +48,17 @@ MAX_STEPS = 50
 MAX_DELAY_MS = 30000
 MAX_TEXT = 500
 MAX_DEPTH = 3
+# One budget for disk, backups, offline CLI and IPC. Measure the expanded,
+# pretty-printed configuration so defaults and JSON escaping are included.
+# The remaining 16 KiB of the 64 KiB IPC frame is reserved for its envelope.
+MAX_CONFIG_BYTES = 48 * 1024
+MAX_PROFILES = 32
+MAX_DEVICES = 16
+MAX_AUTOMATIONS = 32
+MAX_TOTAL_STEPS = 256
+MAX_LABEL = 500
+MAX_ARGV = 128
+MAX_ARGUMENT = 1024
 AUTOMATION_ID = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 BACKUP_NAME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:-(?:\d{2}|\d{12}))?\Z")
 
@@ -67,6 +78,40 @@ def _object(value, path, allowed):
 def _integer(value, path, low, high):
     if type(value) is not int or not low <= value <= high:
         _error(path, f"expected an integer from {low} to {high}")
+
+
+def _size_error():
+    return ConfigError(
+        f"config exceeds the {MAX_CONFIG_BYTES}-byte budget (including defaults); "
+        "move the oversized file aside and reduce it or restore a smaller backup; "
+        "the last good configuration is kept"
+    )
+
+
+def read_config(stream):
+    """Bound the read before JSON parsing, including stdin and backup files."""
+    data = stream.read(MAX_CONFIG_BYTES + 1)
+    if len(data) > MAX_CONFIG_BYTES or (
+        isinstance(data, str) and len(data.encode("utf-8")) > MAX_CONFIG_BYTES
+    ):
+        raise _size_error()
+    return data
+
+
+def read_config_file(path):
+    with Path(path).open("rb") as stream:
+        return read_config(stream)
+
+
+def _check_size(raw):
+    total = 1  # final newline
+    try:
+        for chunk in json.JSONEncoder(indent=2, allow_nan=False).iterencode(raw):
+            total += len(chunk.encode("utf-8"))
+            if total > MAX_CONFIG_BYTES:
+                raise _size_error()
+    except (TypeError, RecursionError) as exc:
+        raise ConfigError("config must be a bounded JSON object") from exc
 
 
 def validate_settings(value, path="settings"):
@@ -132,11 +177,16 @@ def validate_action(value, path, automations=None, *, step=False):
         if (
             not isinstance(argv, list)
             or not argv
-            or len(argv) > 128
-            or any(not isinstance(a, str) or not a or "\x00" in a for a in argv)
+            or len(argv) > MAX_ARGV
+            or any(
+                not isinstance(a, str) or not a or "\x00" in a or len(a) > MAX_ARGUMENT
+                for a in argv
+            )
         ):
             _error(
-                f"{path}.argv", "expected a nonempty list of nonempty strings, without NUL bytes"
+                f"{path}.argv",
+                f"expected 1-{MAX_ARGV} nonempty arguments, each at most "
+                f"{MAX_ARGUMENT} characters, without NUL bytes",
             )
     elif kind == "desktop" and (
         not isinstance(value.get("action"), str) or value["action"] not in DESKTOP_ACTIONS
@@ -268,6 +318,7 @@ def _options(value, path, settings=True, automations=None):
 
 
 def validate(raw):
+    _check_size(raw)
     _object(
         raw,
         "config",
@@ -290,6 +341,8 @@ def validate(raw):
     automations = raw.get("automations", {})
     if not isinstance(automations, dict):
         _error("config.automations", "expected an object")
+    if len(automations) > MAX_AUTOMATIONS:
+        _error("config.automations", f"at most {MAX_AUTOMATIONS} automations")
     for ident, definition in automations.items():
         path = f"config.automations.{ident}"
         if not isinstance(ident, str) or not AUTOMATION_ID.fullmatch(ident):
@@ -297,7 +350,7 @@ def validate(raw):
         _object(definition, path, {"name", "description", "steps"})
         for field in ("name", "description"):
             value = definition.get(field)
-            if not isinstance(value, str) or not value or len(value) > 500:
+            if not isinstance(value, str) or not value or len(value) > MAX_LABEL:
                 _error(f"{path}.{field}", "expected a nonempty string of at most 500 characters")
         validate_steps(definition.get("steps"), f"{path}.steps", automations)
 
@@ -335,12 +388,21 @@ def validate(raw):
         entries = raw.get(group, [])
         if not isinstance(entries, list):
             _error(f"config.{group}", "expected a list")
+        limit = MAX_DEVICES if group == "devices" else MAX_PROFILES
+        if len(entries) > limit:
+            _error(f"config.{group}", f"at most {limit} entries")
         for i, entry in enumerate(entries):
             path = f"config.{group}[{i}]"
             option_fields = set(DEFAULTS) if group == "devices" else set(DEFAULTS) - {"settings"}
             _object(entry, path, option_fields | {"name", "match"})
-            if "name" in entry and (not isinstance(entry["name"], str) or not entry["name"]):
-                _error(f"{path}.name", "expected a nonempty label")
+            if "name" in entry and (
+                not isinstance(entry["name"], str)
+                or not entry["name"]
+                or len(entry["name"]) > MAX_LABEL
+            ):
+                _error(
+                    f"{path}.name", f"expected a nonempty label of at most {MAX_LABEL} characters"
+                )
             match = entry.get("match")
             _object(match, f"{path}.match", allowed)
             if not match:
@@ -360,14 +422,20 @@ def validate(raw):
                 automations,
             )
     pending = [(raw, "config")]
+    total_steps = 0
     while pending:
         value, path = pending.pop()
         if isinstance(value, dict):
+            if isinstance(value.get("steps"), list):
+                total_steps += len(value["steps"])
+                if total_steps > MAX_TOTAL_STEPS:
+                    _error(path, f"config exceeds {MAX_TOTAL_STEPS} total steps")
             if value.get("type") in ("sequence", "automation"):
                 validate_expanded_action(value, automations, path)
             pending.extend((child, f"{path}.{key}") for key, child in value.items())
         elif isinstance(value, list):
             pending.extend((child, f"{path}[{i}]") for i, child in enumerate(value))
+    _check_size(full_config(raw))
     return copy.deepcopy(raw)
 
 
@@ -406,6 +474,11 @@ def full_config(raw):
 
 
 def _decode(data):
+    if len(data) > MAX_CONFIG_BYTES or (
+        isinstance(data, str) and len(data.encode("utf-8")) > MAX_CONFIG_BYTES
+    ):
+        raise _size_error()
+
     def pairs(items):
         out = {}
         for key, value in items:
@@ -416,7 +489,7 @@ def _decode(data):
 
     try:
         return validate(json.loads(data, object_pairs_hook=pairs))
-    except (json.JSONDecodeError, UnicodeError) as exc:
+    except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
         raise ConfigError(f"invalid JSON: {exc}") from exc
 
 
@@ -439,7 +512,7 @@ class ConfigFile:
     def reload(self):
         try:
             stamp = self.stamp()
-            data = self.path.read_bytes() if stamp is not None else b"{}"
+            data = read_config_file(self.path) if stamp is not None else b"{}"
             raw = _decode(data)
         except (OSError, ConfigError) as exc:
             self.error = f"{self.path}: {exc}"
@@ -497,7 +570,9 @@ class ConfigFile:
             raise ConfigError("config changed or is invalid; reload it before saving settings")
         validate(raw)
         if backup and self.path.exists():
-            self._atomic(self.path.with_suffix(self.path.suffix + ".bak"), self.path.read_bytes())
+            self._atomic(
+                self.path.with_suffix(self.path.suffix + ".bak"), read_config_file(self.path)
+            )
         self._atomic(self.path, (json.dumps(raw, indent=2) + "\n").encode())
         self.raw = copy.deepcopy(raw)
         self._stamp = self._loaded_stamp = self.stamp()
@@ -574,7 +649,7 @@ class ConfigFile:
         self._atomic(counter, str(sequence).encode())
         name = f"{datetime.now():%Y-%m-%dT%H-%M-%S}-{sequence:012d}"
         backup = directory / f"{name}.json"
-        previous = self.path.read_bytes() if self.path.exists() else b"{}\n"
+        previous = read_config_file(self.path) if self.path.exists() else b"{}\n"
         self._atomic(backup, previous)
         try:
             self.replace(raw, backup=False)
@@ -596,7 +671,7 @@ class ConfigFile:
         if path.is_symlink():
             raise ConfigError("refusing a symlinked backup")
         try:
-            data = path.read_bytes()
+            data = read_config_file(path)
         except FileNotFoundError as exc:
             raise ConfigError("backup not found") from exc
         return self.apply(_decode(data))
@@ -607,10 +682,10 @@ class ConfigFile:
             if not files:
                 raise ConfigError("no configuration backup to undo")
             target = files[0]
-            raw = _decode(target.read_bytes())
+            raw = _decode(read_config_file(target))
             if self.error or self.stamp() != self._loaded_stamp:
                 raise ConfigError("config changed or is invalid; reload it before undoing")
-            previous = self.path.read_bytes() if self.path.exists() else b"{}\n"
+            previous = read_config_file(self.path) if self.path.exists() else b"{}\n"
             if finalize:
                 redo = self._prepare_undo_locked(directory, target.stem, previous)
             try:
@@ -618,7 +693,7 @@ class ConfigFile:
             except Exception:
                 if finalize:
                     try:
-                        if self.path.read_bytes() != previous:
+                        if read_config_file(self.path) != previous:
                             self._atomic(self.path, previous)
                             self.raw = _decode(previous)
                             self._stamp = self._loaded_stamp = self.stamp()

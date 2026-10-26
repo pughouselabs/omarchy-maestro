@@ -13,9 +13,16 @@ import tempfile
 _ROOT = tempfile.mkdtemp(prefix="maestro-tests-")
 atexit.register(shutil.rmtree, _ROOT, True)
 
-for _name in ("XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME"):
+for _name in (
+    "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_STATE_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+):
     _path = os.path.join(_ROOT, _name.lower())
     os.makedirs(_path, mode=0o700, exist_ok=True)
     os.environ[_name] = _path
 os.environ["MAESTRO_CONFIG_HOME"] = os.path.join(_ROOT, "xdg_config_home", "maestro")
 os.environ.pop("HYPRLAND_INSTANCE_SIGNATURE", None)
+os.environ["XDG_CURRENT_DESKTOP"] = "Hyprland"

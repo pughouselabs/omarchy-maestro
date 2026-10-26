@@ -316,7 +316,29 @@ BUTTON_LABELS = {
 }
 
 
-def control_device(status, device_number, diversion=None, config=None):
+def device_selector(path, index, model, unit):
+    """The identity an explicit release must match: position alone can change."""
+    return {"path": path, "index": index, "model": model, "unit": unit}
+
+
+def valid_selector(value):
+    return (
+        isinstance(value, dict)
+        and set(value) == {"path", "index", "model", "unit"}
+        and isinstance(value["path"], str)
+        and type(value["index"]) is int
+        and isinstance(value["model"], str)
+        and (value["unit"] is None or isinstance(value["unit"], str))
+    )
+
+
+def control_device(status, device_number, diversion=None, config=None, include_options=True):
+    """The settings-app view of one mouse.
+
+    Resolved options can be as large as the whole configuration, so a list of
+    several mice leaves them out (include_options=False) and the app reads them
+    for one mouse at a time.
+    """
     # mouse.status() reads mouse.battery() on both the direct CLI and daemon paths.
     # Keep read errors and HID++ source details out of the settings-app contract.
     battery = status.get("battery")
@@ -338,12 +360,11 @@ def control_device(status, device_number, diversion=None, config=None):
         "name": status.get("model") or status.get("name"),
         "index": status.get("index"),
     }
-    return {
+    result = {
         "device": device_number,
         "model": status.get("model") or status.get("name"),
         "writable": bool(status.get("writable", False)),
         "identity": identity,
-        "options": resolve(config or {}, dict(identity, path=status.get("path"))),
         "battery": battery,
         "buttons": buttons,
         "gesture": bool(gesture and gesture.raw_xy and gesture.divertable),
@@ -351,4 +372,15 @@ def control_device(status, device_number, diversion=None, config=None):
         "dpi": status.get("dpi"),
         "smartshift": status.get("smartshift"),
         "scroll": {"inverted": (status.get("wheel") or {}).get("inverted", False)},
+        "problem": status.get("problem"),
+        "release_available": bool(status.get("release_available", False)),
+        "selector": device_selector(
+            status.get("path"),
+            status.get("index"),
+            status.get("model") or status.get("name"),
+            getattr(diversion, "unit_key", None),
+        ),
     }
+    if include_options:
+        result["options"] = resolve(config or {}, dict(identity, path=status.get("path")))
+    return result

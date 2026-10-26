@@ -42,7 +42,8 @@ Controls.Button {
     FocusRing { control:root }
     Behavior on color { ColorAnimation { duration:Style.motion; easing.type:Easing.OutCubic } }
   }
-  Controls.ToolTip { visible:root.hovered && root.tooltipText !== ""; text:root.tooltipText; delay:600
+  Controls.ToolTip { objectName:"maestro-tooltip"; visible:root.hovered && root.tooltipText !== ""; text:root.tooltipText.slice(0,1024); delay:600
+    contentItem:Text { text:root.tooltipText.slice(0,1024); textFormat:Text.PlainText; color:Theme.foreground; font:root.font; wrapMode:Text.Wrap; width:Math.min(implicitWidth,480) }
     enter:Transition { NumberAnimation { property:"opacity"; from:0; to:1; duration:100 } }
     exit:Transition { NumberAnimation { property:"opacity"; to:0; duration:0 } }
   }
