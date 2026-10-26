@@ -5,6 +5,7 @@ import copy
 import io
 import json
 import os
+import shutil
 import signal
 import stat
 import tempfile
@@ -1092,6 +1093,9 @@ class OwnershipTests(unittest.TestCase):
 
     def fake_proc(self, processes):
         proc = self.root / "proc"
+        # Start empty: leftovers from an earlier call would make the answer depend
+        # on directory order, which differs between file systems.
+        shutil.rmtree(proc, ignore_errors=True)
         for pid, (comm, argv) in processes.items():
             entry = proc / str(pid)
             entry.mkdir(parents=True)
